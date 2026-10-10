@@ -56,52 +56,59 @@ Cần biết tên miền, subdomain quản lý, các subdomain đang dùng, moun
 và cách quản lý Tunnel trước khi public. Không gửi mật khẩu/token hoặc nội
 dung file credentials vào chat; chỉ cần thông tin kỹ thuật không nhạy cảm.
 
-## 2. Build và chuyển artifact
+## 2. Tải gói cài và kiểm tra checksum
 
-Nếu lấy bản đã push lên GitHub, mở repository → **Actions** → lần chạy
-**GửiWeb - kiểm tra và build** đã thành công → tải artifact
-`guiweb-openwrt-arm64`. Giải nén ZIP tải về để lấy
-`guiweb-openwrt-arm64.tar.gz`. Workflow mới tạo vẫn cần chạy thành công trên
-GitHub; kiểm tra trạng thái thực tế trước khi tải. Các bước dưới đây cũng cho
-phép build trong cloud.
+Tải trực tiếp bản [v0.1.0 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.0):
 
-Trong checkout ở cloud:
+- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz).
+- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256).
 
-```sh
-cd /workspace/chia_se_web
-./scripts/install-dev.sh
-./scripts/build.sh
-sed -n '/ guiweb-linux-arm64$/p' bin/SHA256SUMS > /tmp/guiweb-arm64.sha256
-```
-
-Tạo thư mục nhận riêng trên router, rồi chuyển `bin/guiweb-linux-arm64`,
-`/tmp/guiweb-arm64.sha256`, `deploy/guiweb.init` và
-`deploy/config.example.json` vào đó bằng SCP/SFTP đang dùng. Ví dụ thư mục
-nhận tạm là `/tmp/guiweb-release`; thay địa chỉ SSH bằng router thực tế.
-
-Cũng có thể chuyển một file `bin/guiweb-openwrt-arm64.tar.gz` thay vì từng file.
-Tạo thư mục nhận riêng, chuyển gói vào đó rồi giải nén:
+Dùng thư mục nhận riêng trên router. Ví dụ bên dưới dùng
+`/tmp/guiweb-release`; nếu đã có dữ liệu trong thư mục này, chọn thư mục mới
+và thay đường dẫn tương ứng trong các bước sau. Chạy tải và kiểm tra:
 
 ```sh
 mkdir -p /tmp/guiweb-release
-tar -xzf /tmp/guiweb-release/guiweb-openwrt-arm64.tar.gz -C /tmp/guiweb-release
+cd /tmp/guiweb-release
+wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz'
+wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256'
+sha256sum -c guiweb-openwrt-arm64.tar.gz.sha256
 ```
 
-Kiểm tra tên file trong archive trước nếu nguồn gửi khác với bản vừa build;
-không dùng gói chưa được xác thực từ nguồn không rõ.
-
-Trên router, kiểm tra hash trước khi dùng binary:
+Chỉ khi tải thành công và checksum báo `OK` mới giải nén, kiểm tra tiếp binary:
 
 ```sh
-cd /tmp/guiweb-release
+tar -xzf guiweb-openwrt-arm64.tar.gz -C /tmp/guiweb-release
 sha256sum -c guiweb-arm64.sha256
 chmod 755 guiweb-linux-arm64
 ./guiweb-linux-arm64 version
 ```
 
-Checksum giúp phát hiện lỗi khi chuyển file. Giữ SSH xác thực host key; hash
-truyền cùng artifact không thay thế xác thực nguồn gửi. Nếu shell báo lỗi
-kiến trúc, dừng và kiểm tra lại `uname -m`; không thử thay thư viện hệ thống.
+Giữ kiểm tra TLS mặc định của `wget`. Nếu tải không được do thiếu CA hoặc
+không có tiện ích HTTPS phù hợp, tải hai file trên máy tính rồi chuyển bằng
+SCP/SFTP; kiểm tra checksum trên router trước khi giải nén. Không tắt kiểm
+tra chứng chỉ để tải. Nếu shell báo lỗi kiến trúc, dừng và kiểm tra lại
+`uname -m`; không thử thay thư viện hệ thống.
+
+Hai cách lấy gói thay thế:
+
+- **GitHub Actions:** workflow **GửiWeb - kiểm tra và build** đã chạy thành
+  công. Mở repository → **Actions** → lần chạy thành công → tải artifact
+  `guiweb-openwrt-arm64`, giải nén ZIP để lấy TAR.GZ. Artifact có hạn giữ
+  14 ngày; có thể chạy lại bằng **Run workflow**.
+- **Build trong cloud:** dùng checkout hiện có và các lệnh bên dưới, rồi
+  chuyển `bin/guiweb-openwrt-arm64.tar.gz` lên router bằng SCP/SFTP.
+
+```sh
+cd /workspace/chia_se_web
+./scripts/install-dev.sh
+./scripts/build.sh
+```
+
+Với gói từ Actions hoặc bản vừa build, giải nén trong thư mục nhận riêng và
+kiểm tra `guiweb-arm64.sha256` bên trong trước khi dùng binary. Checksum
+giúp phát hiện lỗi truyền file; không thay thế xác thực nguồn gửi. Giữ SSH
+xác thực host key và chỉ dùng gói từ repository/runner tin cậy.
 
 ## 3. Tài khoản dịch vụ và thư mục dữ liệu
 

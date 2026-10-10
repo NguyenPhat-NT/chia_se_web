@@ -75,6 +75,17 @@ curl --fail --silent --show-error -H 'Host: app.localhost' http://127.0.0.1:8088
 
 ## Build và cài lên router
 
+Tải trực tiếp bản [v0.1.0 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.0):
+
+- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz).
+- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256).
+
+Có thể dùng `wget` trên router để tải hai file, kiểm tra SHA-256 trước khi
+giải nén; lệnh đầy đủ nằm trong [hướng dẫn OpenWrt](docs/OPENWRT.md#2-tải-gói-cài-và-kiểm-tra-checksum).
+Gói gồm binary, checksum, cấu hình và script dịch vụ; chưa tự cài lên router.
+
+Nếu muốn tự build trong checkout:
+
 `./scripts/build.sh` tạo binary Linux amd64 và Linux arm64 thuần Go, không
 phụ thuộc CGO, cùng `bin/SHA256SUMS` và gói `bin/guiweb-openwrt-arm64.tar.gz`
 chứa binary, checksum, cấu hình và script dịch vụ. Router hiện đã xác nhận `uname -m` là
@@ -93,10 +104,12 @@ Cấu hình router đã điền `app.phatnt.id.vn` cho trang quản lý và
 không dùng đoạn này thay toàn bộ cấu hình Tunnel. Route của `in4` phải giữ
 nguyên và đứng trước wildcard khi cùng nằm trong một ingress.
 
-Workflow GitHub Actions kiểm tra test/race/vet, build và tải gói ARM64 lên
-artifact `guiweb-openwrt-arm64` khi push vào `main`. Sau khi workflow thành
-công, mở tab **Actions**, chọn lần chạy rồi tải artifact để chuyển lên router.
-Artifact được giữ 14 ngày; có thể chạy lại bằng **Run workflow**.
+Workflow **GửiWeb - kiểm tra và build** đã chạy thành công trên GitHub: kiểm
+tra test/race/vet, build và tạo artifact `guiweb-openwrt-arm64`. Đây là cách
+lấy gói thay thế: mở tab **Actions**, chọn lần chạy thành công rồi tải artifact
+ZIP và lấy file TAR.GZ bên trong. Artifact được giữ 14 ngày; có thể chạy lại
+bằng **Run workflow**. Workflow phát hành chạy thủ công để tạo bản trên
+GitHub Releases sau khi kiểm tra và build.
 
 Trang quản lý và từng website dùng hostname riêng. Cookie quản lý không chia
 sẻ cho các subdomain; API kiểm tra quyền, Origin và CSRF. Nội dung upload có
