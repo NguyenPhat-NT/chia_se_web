@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f8f5">
+  <meta name="referrer" content="no-referrer">
+  <title>GửiWeb — Một website, một đường link</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231e6655'/%3E%3Cpath d='M14 23h36v27H14z' fill='%23d4f2a4'/%3E%3Cpath d='M14 23l18-10 18 10M14 23l18 12 18-12' fill='none' stroke='%231e6655' stroke-width='4' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Đến nội dung chính</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="GửiWeb, trang chủ">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 12h22v16H5z" fill="currentColor"/><path d="m5 12 11-7 11 7M5 12l11 8 11-8" fill="none" stroke="var(--brand-icon-line)" stroke-width="2" stroke-linejoin="round"/></svg></span>
+      <span>GửiWeb<span class="brand-dot">.</span></span>
+    </a>
+    <div class="header-actions">
+      <button id="theme-toggle" class="icon-button" type="button" aria-label="Chuyển sang giao diện tối" title="Đổi giao diện"></button>
+      <div id="account-actions" class="account-actions" hidden>
+        <span id="account-name" class="account-name"></span>
+        <button id="logout-button" class="button button-small button-quiet" type="button">Đăng xuất</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <div id="loading-view" class="loading-view" role="status"><span class="spinner" aria-hidden="true"></span><span>Đang mở không gian của bạn…</span></div>
+
+    <section id="auth-view" class="auth-layout" hidden aria-labelledby="auth-heading">
+      <div class="intro">
+        <span class="eyebrow"><span class="status-dot"></span> MỘT GÓC NHỎ CHO WEBSITE CỦA BẠN</span>
+        <h1>Từ ý tưởng.<br>Đến <span>một đường link.</span></h1>
+        <p>Tải website lên, gửi link cho người quen.<br>Phần còn lại để GửiWeb lo.</p>
+        <div class="intro-art" aria-hidden="true">
+          <div class="art-orbit"></div>
+          <div class="art-window"><div class="art-window-top"><i></i><i></i><i></i><span>một điều bạn muốn chia sẻ</span></div><div class="art-window-content"><span class="art-tag">HELLO, WORLD!</span><div class="art-line art-line-long"></div><div class="art-line"></div><div class="art-blocks"><span></span><span></span><span></span></div></div></div>
+          <div class="art-link"><svg viewBox="0 0 24 24"><path d="m10 13 4-4m-6 6-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 2 1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span>Sẵn sàng để chia sẻ</span><span class="art-check">✓</span></div>
+        </div>
+        <div class="intro-bottom"><span>Gọn nhẹ.</span><span>Dễ dùng.</span><span>Của chúng mình.</span></div>
+      </div>
+      <div class="auth-card">
+        <span id="auth-eyebrow" class="eyebrow">CHÀO MỪNG TRỞ LẠI</span>
+        <h2 id="auth-heading">Đăng nhập</h2>
+        <p id="auth-description" class="muted">Không gian để quản lý những website của bạn.</p>
+        <form id="auth-form">
+          <div class="field"><label for="username">Tên tài khoản</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[A-Za-z0-9_\-]{3,32}" required placeholder="Tên tài khoản của bạn"><span id="username-hint" class="field-hint" hidden>3–32 ký tự, gồm chữ không dấu, số, dấu _ hoặc -.</span></div>
+          <div class="field"><label for="password">Mật khẩu</label><div class="password-field"><input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Nhập mật khẩu"><button id="password-toggle" class="password-toggle" type="button" aria-label="Hiện mật khẩu" aria-pressed="false">Hiện</button></div><span id="password-hint" class="field-hint" hidden>Ít nhất 12 ký tự. Hãy chọn mật khẩu riêng cho GửiWeb.</span></div>
+          <div id="confirm-field" class="field" hidden><label for="password-confirm">Nhập lại mật khẩu</label><input id="password-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="Nhập lại mật khẩu"></div>
+          <p id="auth-error" class="form-error" role="alert" hidden></p>
+          <button id="auth-submit" class="button button-primary button-full" type="submit">Đăng nhập <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button>
+        </form>
+        <p id="auth-footnote" class="auth-footnote">Chưa có tài khoản? Nhờ chủ GửiWeb gửi bạn một link mời.</p><button id="auth-switch-button" class="auth-switch" type="button" hidden>Đã có tài khoản? Đăng nhập</button>
+      </div>
+    </section>
+
+    <section id="workspace-view" class="workspace" hidden aria-labelledby="workspace-heading">
+      <div class="workspace-head"><div><span class="eyebrow">KHÔNG GIAN CHIA SẺ</span><h1 id="workspace-heading">Website của bạn<span class="brand-dot">.</span></h1><p id="workspace-description" class="muted">Những ý tưởng đã có một địa chỉ riêng.</p></div><button id="new-site-button" class="button button-primary" type="button"><span class="button-plus" aria-hidden="true">+</span> Tải website lên</button></div>
+      <div class="workspace-nav"><div class="tabs" role="tablist" aria-label="Quản lý"><button id="sites-tab" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="sites-panel">Website <span id="site-count" class="count-badge">0</span></button><button id="invites-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="invites-panel" hidden>Lời mời</button></div><div id="storage-summary" class="storage-summary" title="Dung lượng website đang sử dụng"><span class="storage-dot"></span><span id="storage-text">—</span></div></div>
+      <section id="sites-panel" role="tabpanel" aria-labelledby="sites-tab">
+        <div id="sites-toolbar" class="sites-toolbar" hidden><label class="search-box"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span class="sr-only">Tìm website</span><input id="site-search" type="search" placeholder="Tìm theo tên hoặc địa chỉ…" autocomplete="off"></label><span class="toolbar-note">Một link, bao nhiêu lần cập nhật cũng được.</span></div>
+        <p id="sites-error" class="panel-error" role="alert" hidden></p>
+        <div id="sites-loading" class="panel-loading" role="status" hidden><span class="spinner" aria-hidden="true"></span>Đang tải website…</div>
+        <div id="sites-grid" class="sites-grid"></div>
+        <div id="empty-sites" class="empty-state" hidden><div class="empty-art" aria-hidden="true"><svg viewBox="0 0 80 72"><rect x="12" y="12" width="56" height="46" rx="7"/><path d="M12 24h56M23 18h1m5 0h1m5 0h1M31 39h18m-9-9v18"/></svg></div><span class="eyebrow">BẮT ĐẦU TỪ ĐÂY</span><h2>Một website đang chờ bạn.</h2><p>Tải lên một trang HTML, file ZIP hoặc thư mục website.<br>GửiWeb sẽ tạo link để bạn chia sẻ ngay.</p><button id="empty-upload-button" class="button button-primary" type="button">Tải website đầu tiên <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button><span id="empty-limit" class="empty-caption">HTML · ZIP · Thư mục</span></div>
+        <div id="no-search-results" class="no-results" hidden>Không tìm thấy website phù hợp. Thử tên hoặc địa chỉ khác nhé.</div>
+      </section>
+      <section id="invites-panel" role="tabpanel" aria-labelledby="invites-tab" hidden><div class="invite-head"><div><h2>Chia sẻ không gian này</h2><p class="muted">Gửi một link mời để người quen tự tạo tài khoản.</p></div><button id="create-invite-button" class="button button-primary" type="button">Tạo link mời <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button></div><div id="new-invite-result" class="invite-result" hidden><label for="invite-url">Link mời mới của bạn</label><div class="copy-field"><input id="invite-url" type="text" readonly><button id="copy-invite-button" class="button button-primary button-small" type="button">Sao chép</button></div><p id="invite-result-expiry" class="field-hint"></p><p class="field-hint">Link chỉ dùng được một lần. Hãy gửi trực tiếp cho người bạn muốn mời.</p></div><p id="invites-error" class="panel-error" role="alert" hidden></p><div id="invites-list" class="invites-list"></div><p id="empty-invites" class="muted empty-invites" hidden>Chưa có lời mời nào. Tạo một link để mời người đầu tiên.</p></section>
+      <footer class="workspace-footer"><span>GửiWeb — một góc nhỏ trên Internet.</span><span>Được tạo ra để chia sẻ.</span></footer>
+    </section>
+  </main>
+
+  <dialog id="upload-dialog" class="dialog" aria-labelledby="upload-heading">
+    <form id="upload-form"><div class="dialog-header"><div><span id="upload-eyebrow" class="eyebrow">THÊM MỘT ĐIỀU MỚI</span><h2 id="upload-heading">Tải website lên</h2></div><button class="icon-button dialog-close" type="button" aria-label="Đóng"><span aria-hidden="true">×</span></button></div><p id="upload-description" class="muted dialog-description">Chọn nội dung, đặt một cái tên và sẵn sàng chia sẻ.</p>
+      <div id="new-site-fields"><div class="field"><label for="site-name">Tên website</label><input id="site-name" name="name" maxlength="80" required placeholder="Ví dụ: Góc ảnh của mình"></div><div class="field"><label for="site-slug">Tên trong link chia sẻ</label><input id="site-slug" name="slug" class="mono" autocapitalize="none" spellcheck="false" minlength="3" maxlength="40" pattern="[a-z0-9](?:[a-z0-9\-]{1,38}[a-z0-9])" required placeholder="goc-anh"><span class="field-hint">3–40 ký tự: chữ thường, số, dấu -. Địa chỉ này giữ nguyên khi cập nhật.</span></div></div>
+      <fieldset class="upload-method"><legend>Nội dung tải lên</legend><div class="segmented-control"><label><input type="radio" name="mode" value="zip" checked><span>File ZIP</span></label><label><input type="radio" name="mode" value="folder"><span>Thư mục</span></label><label><input type="radio" name="mode" value="html"><span>File HTML</span></label></div></fieldset>
+      <label id="file-dropzone" class="file-dropzone" for="upload-files"><svg aria-hidden="true" viewBox="0 0 32 32"><path d="M7 22v5h18v-5M16 23V5m-7 7 7-7 7 7"/></svg><strong id="file-pick-label">Chọn file ZIP</strong><span id="file-pick-hint">hoặc kéo thả file vào đây</span><input id="upload-files" type="file" accept=".zip,application/zip" class="sr-only"></label>
+      <div id="file-selection" class="file-selection" hidden><div><strong id="file-selection-name"></strong><span id="file-selection-size" class="muted"></span></div><button id="clear-files-button" class="icon-button" type="button" aria-label="Bỏ nội dung đã chọn">×</button></div><p id="upload-limit-hint" class="field-hint upload-limit-hint"></p>
+      <label id="upload-spa-field" class="checkbox-field"><input id="site-spa" type="checkbox"><span><strong>Hỗ trợ điều hướng ứng dụng</strong><span class="field-hint">Bật nếu bản build React/Vue cần mở trực tiếp đường dẫn như /gioi-thieu.</span></span></label>
+      <p id="upload-error" class="form-error" role="alert" hidden></p><div id="upload-progress" class="upload-progress" hidden role="status"><div><span id="upload-progress-label">Đang tải lên…</span><strong id="upload-progress-percent">0%</strong></div><progress id="upload-progress-bar" max="100" value="0" aria-label="Tiến độ tải lên"></progress><span class="field-hint">Giữ cửa sổ này mở đến khi hoàn tất.</span></div><div class="dialog-footer"><button class="button button-quiet dialog-cancel" type="button">Hủy</button><button id="upload-submit" class="button button-primary" type="submit">Tạo link chia sẻ <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19 19 5M5 5h14v14"/></svg></button></div>
+    </form>
+  </dialog>
+
+  <dialog id="edit-dialog" class="dialog dialog-small" aria-labelledby="edit-heading"><form id="edit-form"><div class="dialog-header"><div><span class="eyebrow">MỘT CHÚT THAY ĐỔI</span><h2 id="edit-heading">Chỉnh sửa website</h2></div><button class="icon-button dialog-close" type="button" aria-label="Đóng">×</button></div><div class="field"><label for="edit-name">Tên website</label><input id="edit-name" maxlength="80" required></div><label class="checkbox-field"><input id="edit-spa" type="checkbox"><span><strong>Hỗ trợ điều hướng ứng dụng</strong><span class="field-hint">Dành cho bản build React/Vue có nhiều đường dẫn.</span></span></label><p class="field-hint">Link chia sẻ của website được giữ nguyên.</p><p id="edit-error" class="form-error" role="alert" hidden></p><div class="dialog-footer"><button class="button button-quiet dialog-cancel" type="button">Hủy</button><button id="edit-submit" class="button button-primary" type="submit">Lưu thay đổi</button></div></form></dialog>
+
+  <dialog id="delete-dialog" class="dialog dialog-small" aria-labelledby="delete-heading"><div class="dialog-header"><div><span class="eyebrow">XÓA WEBSITE</span><h2 id="delete-heading">Bạn chắc chắn muốn xóa?</h2></div><button class="icon-button dialog-close" type="button" aria-label="Đóng">×</button></div><p class="muted">Website <strong id="delete-name"></strong> sẽ bị xóa. Link đã chia sẻ sẽ không còn truy cập được.</p><p class="field-hint">Thao tác này không thể hoàn tác. Địa chỉ đã xóa không được dùng lại.</p><p id="delete-error" class="form-error" role="alert" hidden></p><div class="dialog-footer"><button class="button button-quiet dialog-cancel" type="button" autofocus>Giữ lại website</button><button id="delete-submit" class="button button-danger" type="button">Xóa website</button></div></dialog>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+  <noscript><div class="noscript">Bạn cần bật JavaScript để đăng nhập và quản lý website.</div></noscript>
+</body>
+</html>

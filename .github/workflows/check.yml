@@ -1,0 +1,46 @@
+name: GửiWeb - kiểm tra và build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guiweb-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GUIWEB_WORKSPACE: ${{ runner.temp }}/guiweb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install verified Go SDK and pinned dependencies
+        run: ./scripts/install-dev.sh
+      - name: Test and vet
+        run: |
+          export PATH="$GUIWEB_WORKSPACE/toolchains/go/bin:$PATH"
+          export GOCACHE="$GUIWEB_WORKSPACE/.cache/guiweb-go"
+          export GOPATH="$GUIWEB_WORKSPACE/.cache/guiweb-gopath"
+          export GOTOOLCHAIN=local
+          go test -race -mod=readonly ./...
+          go vet ./...
+      - name: Build native and router binaries
+        run: ./scripts/build.sh
+      - name: Upload router installation package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: guiweb-openwrt-arm64
+          path: bin/guiweb-openwrt-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 14

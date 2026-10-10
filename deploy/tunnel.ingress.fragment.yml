@@ -1,0 +1,8 @@
+# Chỉ là hai route bổ sung, không phải cấu hình Tunnel đầy đủ.
+# Giữ nguyên route in4.phatnt.id.vn với service hiện có, đặt trước wildcard.
+# Ghép hai mục này vào ingress hiện có, trước catch-all cuối danh sách.
+# Giữ Host header gốc; không đặt httpHostHeader cố định trên wildcard.
+- hostname: app.phatnt.id.vn
+  service: http://127.0.0.1:8088
+- hostname: "*.phatnt.id.vn"
+  service: http://127.0.0.1:8088

@@ -1,0 +1,16 @@
+{
+  "listen": "127.0.0.1:8088",
+  "data_dir": "/overlay/guiweb",
+  "admin_host": "app.phatnt.id.vn",
+  "base_domain": "phatnt.id.vn",
+  "scheme": "https",
+  "dev": false,
+  "trust_cloudflare": true,
+  "upload_bytes": 52428800,
+  "site_bytes": 104857600,
+  "total_bytes": 536870912,
+  "user_bytes": 134217728,
+  "min_free_bytes": 536870912,
+  "max_files": 5000,
+  "reserved": ["app", "in4", "www", "api", "admin", "mail", "router", "tunnel"]
+}
