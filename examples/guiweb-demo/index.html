@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f7f1">
+  <title>Xin chào từ GửiWeb</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Đến nội dung chính</a>
+  <div class="page-shell">
+    <header class="header">
+      <a class="brand" href="/" aria-label="Trang chủ website mẫu GửiWeb"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 12h22v16H5z"/><path d="m5 12 11-7 11 7M5 12l11 8 11-8"/></svg></span>GửiWeb<span class="brand-dot">.</span></a>
+      <span class="header-label">WEBSITE MẪU</span>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-heading">
+        <div class="hero-copy"><span class="eyebrow"><span class="status-dot"></span> MỘT GÓC NHỎ ĐÃ LÊN MẠNG</span><h1 id="hero-heading">Xin chào,<br><span>một đường link mới.</span></h1><p>Đây là website nhỏ để thử GửiWeb.<br>Một chút màu sắc, một nút bấm, một ghi chú của riêng bạn.</p><div class="address"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></svg><div><span>ĐỊA CHỈ HIỆN TẠI</span><strong id="hostname">Đang chờ JavaScript…</strong></div></div></div>
+        <div class="hero-art" aria-hidden="true"><div class="orbit"></div><div class="paper paper-back"></div><div class="paper paper-front"><div class="paper-dots"><i></i><i></i><i></i></div><div class="paper-content"><svg class="plant" viewBox="0 0 130 118"><path d="M65 97V50"/><path d="M65 68C36 70 21 54 23 34c25-2 44 8 42 34Zm0-15c-1-27 14-44 39-43 2 23-12 42-39 43Z"/><path d="M44 93h42l-6 23H50Z"/></svg><span class="paper-title">Một ý tưởng nhỏ.</span><span class="paper-subtitle">Đã có chỗ trên Internet.</span></div></div><div class="art-tag"><span>✓</span> Sẵn sàng để chia sẻ</div></div>
+      </section>
+
+      <section class="checks" aria-label="Trạng thái website"><div><span class="check-icon" aria-hidden="true">✓</span><span><strong>HTML</strong><span class="check-detail">Trang chính đã mở</span></span></div><div><span id="css-icon" class="check-icon waiting" aria-hidden="true">·</span><span><strong>CSS</strong><span id="css-status" class="check-detail">Đang chờ kiểm tra…</span></span></div><div><span id="js-icon" class="check-icon waiting" aria-hidden="true">·</span><span><strong>JavaScript</strong><span id="js-status" class="check-detail" role="status">Đang chờ JavaScript…</span></span></div></section>
+
+      <div class="demo-grid">
+        <section class="card counter-card" aria-labelledby="counter-heading"><div class="card-heading"><span class="card-number">01</span><span class="eyebrow">THỬ MỘT CHÚT TƯƠNG TÁC</span></div><h2 id="counter-heading">Mỗi lần bấm, một lời chào.</h2><p>Nút này chạy ngay trên trình duyệt của bạn.</p><div class="counter-display"><span id="counter-value" aria-live="polite" aria-atomic="true">0</span><span>lời chào đã gửi</span></div><div class="counter-actions"><button id="counter-button" class="button button-primary" type="button" disabled>Gửi một lời chào <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button><button id="reset-button" class="button button-quiet" type="button" disabled>Đặt lại</button></div><p id="counter-message" class="small-note">JavaScript sẽ bật các nút khi tải xong.</p></section>
+
+        <section class="card note-card" aria-labelledby="note-heading"><div class="card-heading"><span class="card-number">02</span><span class="eyebrow">GIỮ LẠI MỘT ĐIỀU NHO NHỎ</span></div><h2 id="note-heading">Một ghi chú cho lần sau.</h2><p>Được lưu riêng trên trình duyệt này, ở địa chỉ này.</p><form id="note-form"><label for="note-text">Ghi chú của bạn</label><textarea id="note-text" name="note" rows="4" maxlength="1000" placeholder="Hôm nay mình đã chia sẻ website đầu tiên…" disabled></textarea><div class="note-meta"><span id="storage-state">Đang chờ JavaScript…</span><span><span id="note-count">0</span>/1000</span></div><div class="note-actions"><button id="save-note-button" class="button button-primary" type="submit" disabled>Lưu ghi chú <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4 10-10"/></svg></button><button id="clear-note-button" class="button button-quiet" type="button" disabled>Xóa ghi chú</button></div><p id="note-message" class="small-note" role="status">Chỉ lưu khi bạn bấm “Lưu ghi chú”.</p></form></section>
+      </div>
+
+      <aside class="tip"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.5"/></svg><p><strong>Thử tải lại trang sau khi lưu ghi chú.</strong> Bộ đếm sẽ về 0, còn ghi chú sẽ được giữ lại nếu trình duyệt cho phép lưu. Người khác mở link sẽ có ghi chú riêng của họ.</p></aside>
+      <noscript><p class="noscript">JavaScript đang tắt. Bạn vẫn xem được trang, nhưng cần bật JavaScript để thử nút bấm và ghi chú.</p></noscript>
+    </main>
+
+    <footer><span>GửiWeb — những ý tưởng nhỏ, những đường link mới.</span><span>HTML · CSS · JavaScript</span></footer>
+  </div>
+</body>
+</html>
