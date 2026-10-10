@@ -18,13 +18,13 @@ jobs:
   check-and-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      GUIWEB_WORKSPACE: ${{ runner.temp }}/guiweb
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - name: Select writable toolchain workspace
+        run: printf 'GUIWEB_WORKSPACE=%s/guiweb\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Install verified Go SDK and pinned dependencies
         run: ./scripts/install-dev.sh
       - name: Test and vet
