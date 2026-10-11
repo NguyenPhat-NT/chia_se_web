@@ -39,6 +39,6 @@ GUIWEB_PACKAGE_DIR=$(mktemp -d)
 trap 'rm -rf -- "$GUIWEB_PACKAGE_DIR"' EXIT HUP INT TERM
 cp bin/guiweb-linux-arm64 "$GUIWEB_PACKAGE_DIR/"
 sed -n '/ guiweb-linux-arm64$/p' bin/SHA256SUMS > "$GUIWEB_PACKAGE_DIR/guiweb-arm64.sha256"
-cp deploy/guiweb.init deploy/config.example.json deploy/tunnel.ingress.fragment.yml docs/OPENWRT.md docs/UPGRADE_0.1.1.md "$GUIWEB_PACKAGE_DIR/"
-tar -czf bin/guiweb-openwrt-arm64.tar.gz -C "$GUIWEB_PACKAGE_DIR" guiweb-linux-arm64 guiweb-arm64.sha256 guiweb.init config.example.json tunnel.ingress.fragment.yml OPENWRT.md UPGRADE_0.1.1.md
+cp deploy/guiweb.init deploy/config.example.json deploy/tunnel.ingress.fragment.yml docs/OPENWRT.md docs/UPGRADE_0.1.2.md "$GUIWEB_PACKAGE_DIR/"
+tar -czf bin/guiweb-openwrt-arm64.tar.gz -C "$GUIWEB_PACKAGE_DIR" guiweb-linux-arm64 guiweb-arm64.sha256 guiweb.init config.example.json tunnel.ingress.fragment.yml OPENWRT.md UPGRADE_0.1.2.md
 printf 'Built Linux amd64 + arm64, checksums and bin/guiweb-openwrt-arm64.tar.gz.\n'

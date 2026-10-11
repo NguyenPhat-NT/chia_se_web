@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -39,15 +40,71 @@ type userContextKey struct{}
 const schema = `
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,admin INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY,token_hash TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL,used INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY,token_hash TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL,used INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0,max_uses INTEGER NOT NULL DEFAULT 1 CHECK(max_uses BETWEEN 1 AND 1000),use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count BETWEEN 0 AND max_uses));
 CREATE TABLE IF NOT EXISTS sites(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,release_id TEXT NOT NULL,size_bytes INTEGER NOT NULL,spa INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS slug_reservations(slug TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id));
 INSERT OR IGNORE INTO slug_reservations(slug,owner_id) SELECT slug,owner_id FROM sites;
 DELETE FROM slug_reservations WHERE NOT EXISTS (SELECT 1 FROM sites WHERE sites.slug=slug_reservations.slug);
 CREATE INDEX IF NOT EXISTS sites_owner ON sites(owner_id);
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
-PRAGMA user_version=1;
 `
+
+// Optional invite columns preserve the schema understood by older releases.
+// Reusable invitations keep the legacy used flag set, so older binaries refuse
+// them instead of consuming a registration without updating their counters.
+func initializeSchema(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(schema); err != nil {
+		return err
+	}
+	rows, err := tx.Query("PRAGMA table_info(invites)")
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err = rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for _, column := range []struct{ name, definition string }{
+		{"max_uses", "INTEGER NOT NULL DEFAULT 1 CHECK(max_uses BETWEEN 1 AND 1000)"},
+		{"use_count", "INTEGER NOT NULL DEFAULT 0 CHECK(use_count BETWEEN 0 AND max_uses)"},
+	} {
+		if !columns[column.name] {
+			if _, err = tx.Exec("ALTER TABLE invites ADD COLUMN " + column.name + " " + column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	for _, query := range []string{
+		"UPDATE invites SET use_count=1 WHERE max_uses=1 AND used=1 AND use_count=0",
+		"UPDATE invites SET used=1 WHERE max_uses>1 AND used=0",
+		"PRAGMA user_version=1",
+	} {
+		if _, err = tx.Exec(query); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
 
 func New(cfg Config) (*Server, error) {
 	cfg, err := cfg.Validated()
@@ -89,7 +146,7 @@ func New(cfg Config) (*Server, error) {
 		lock.Close()
 		return nil, errors.New("phiên bản cơ sở dữ liệu không được hỗ trợ")
 	}
-	if _, err = db.Exec(schema); err != nil {
+	if err = initializeSchema(db); err != nil {
 		db.Close()
 		lock.Close()
 		return nil, err
@@ -226,6 +283,15 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/invites", s.auth(s.createInvite))
 	m.HandleFunc("DELETE /api/invites/{id}", s.auth(s.revokeInvite))
 	assets, _ := fs.Sub(webFiles, "web")
+	js, _ := fs.ReadFile(assets, "app.js")
+	css, _ := fs.ReadFile(assets, "style.css")
+	jsHash, cssHash := sha256.Sum256(js), sha256.Sum256(css)
+	// Each HTML response names the assets embedded in this binary. Changing
+	// their URLs prevents a browser's older script from using newer markup.
+	assetURLs := strings.NewReplacer(
+		`src="/app.js"`, fmt.Sprintf(`src="/app.js?v=%x"`, jsHash[:8]),
+		`href="/style.css"`, fmt.Sprintf(`href="/style.css?v=%x"`, cssHash[:8]),
+	)
 	m.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/")
 		if name == "" {
@@ -243,6 +309,10 @@ func (s *Server) Handler() http.Handler {
 		types := map[string]string{"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "style.css": "text/css; charset=utf-8"}
 		w.Header().Set("Content-Type", types[name])
 		w.Header().Set("Cache-Control", "no-cache")
+		if name == "index.html" {
+			w.Header().Set("Cache-Control", "no-store")
+			data = []byte(assetURLs.Replace(string(data)))
+		}
 		_, _ = w.Write(data)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

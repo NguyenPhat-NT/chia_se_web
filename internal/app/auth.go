@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -269,7 +272,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.passwordMu.Unlock()
 	var exists int
-	if err := s.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM invites WHERE token_hash=? AND expires_at>? AND used=0 AND revoked=0", tokenHash(b.Token), now()).Scan(&exists); err != nil || exists == 0 {
+	if err := s.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM invites WHERE token_hash=? AND expires_at>? AND (max_uses>1 OR used=0) AND use_count<max_uses AND revoked=0", tokenHash(b.Token), now()).Scan(&exists); err != nil || exists == 0 {
 		fail(w, 400, "Link mời không hợp lệ hoặc đã hết hạn.")
 		return
 	}
@@ -289,7 +292,11 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(r.Context(), "UPDATE invites SET used=1 WHERE token_hash=? AND expires_at>? AND used=0 AND revoked=0", tokenHash(b.Token), now())
+	// Consume capacity in the same transaction as account creation. A rejected
+	// username must leave the invitation available for the next recipient.
+	// For reusable invitations, used=1 is a compatibility gate: older binaries
+	// reject these links instead of admitting members without counting usage.
+	res, err := tx.ExecContext(r.Context(), `UPDATE invites SET use_count=use_count+1,used=CASE WHEN max_uses>1 OR use_count+1>=max_uses THEN 1 ELSE 0 END WHERE token_hash=? AND expires_at>? AND (max_uses>1 OR used=0) AND use_count<max_uses AND revoked=0`, tokenHash(b.Token), now())
 	if err != nil {
 		fail(w, 500, "Không tạo được tài khoản.")
 		return
@@ -317,10 +324,47 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	s.respondMe(w, u, csrf)
 }
 
+func inviteMaxUses(w http.ResponseWriter, r *http.Request) (int, bool) {
+	// The original endpoint accepted an empty POST. Keep that contract, while
+	// validating any supplied options as strictly as the other JSON APIs.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
+	if err != nil {
+		fail(w, http.StatusBadRequest, "Dữ liệu không hợp lệ.")
+		return 0, false
+	}
+	if len(body) == 0 {
+		return 1, true
+	}
+	var options struct {
+		MaxUses json.RawMessage `json:"max_uses"`
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if !readJSON(w, r, &options) {
+		return 0, false
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		fail(w, http.StatusBadRequest, "Dữ liệu không hợp lệ.")
+		return 0, false
+	}
+	if options.MaxUses == nil {
+		return 1, true
+	}
+	var value int
+	if err = json.Unmarshal(options.MaxUses, &value); err != nil || value < 1 || value > 1000 {
+		fail(w, http.StatusBadRequest, "Số lượt đăng ký phải là số nguyên từ 1 đến 1000.")
+		return 0, false
+	}
+	return value, true
+}
+
 func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	u, _ := s.user(r)
 	if !u.Admin {
 		fail(w, 403, "Chỉ quản trị viên được tạo lời mời.")
+		return
+	}
+	maxUses, ok := inviteMaxUses(w, r)
+	if !ok {
 		return
 	}
 	token, err := randomToken(32)
@@ -333,13 +377,18 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "Không tạo được lời mời.")
 		return
 	}
-	expiry := time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
+	duration := 48 * time.Hour
+	if maxUses > 1 {
+		duration = 7 * 24 * time.Hour
+	}
+	expiry := time.Now().UTC().Add(duration).Format(time.RFC3339)
 	// Expired invites need not grow without bound on the router.
 	if _, err = s.db.ExecContext(r.Context(), "DELETE FROM invites WHERE expires_at<?", time.Now().UTC().Add(-30*24*time.Hour).Format(time.RFC3339)); err != nil {
 		fail(w, 500, "Không tạo được lời mời.")
 		return
 	}
-	if _, err = s.db.ExecContext(r.Context(), "INSERT INTO invites(id,token_hash,created_by,expires_at) VALUES(?,?,?,?)", id, tokenHash(token), u.ID, expiry); err != nil {
+	legacyClosed := maxUses > 1
+	if _, err = s.db.ExecContext(r.Context(), "INSERT INTO invites(id,token_hash,created_by,expires_at,max_uses,use_count,used) VALUES(?,?,?,?,?,0,?)", id, tokenHash(token), u.ID, expiry, maxUses, legacyClosed); err != nil {
 		fail(w, 500, "Không tạo được lời mời.")
 		return
 	}
@@ -347,7 +396,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Dev {
 		origin = "http://" + r.Host
 	}
-	writeJSON(w, 201, map[string]any{"id": id, "url": origin + "/?invite=" + token, "expires_at": expiry})
+	writeJSON(w, 201, map[string]any{"id": id, "url": origin + "/?invite=" + token, "expires_at": expiry, "max_uses": maxUses, "use_count": 0, "used": false, "revoked": false})
 }
 
 func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +405,8 @@ func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "Chỉ quản trị viên được xem lời mời.")
 		return
 	}
-	rows, err := s.db.QueryContext(r.Context(), "SELECT id,expires_at,used,revoked FROM invites ORDER BY expires_at DESC LIMIT 100")
+	// API used describes exhaustion, independently of the legacy closed gate.
+	rows, err := s.db.QueryContext(r.Context(), "SELECT id,expires_at,max_uses,use_count,CASE WHEN max_uses>1 THEN use_count>=max_uses ELSE used END,revoked FROM invites ORDER BY expires_at DESC LIMIT 100")
 	if err != nil {
 		fail(w, 500, "Không đọc được lời mời.")
 		return
@@ -367,11 +417,13 @@ func (s *Server) listInvites(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt string `json:"expires_at"`
 		Used      bool   `json:"used"`
 		Revoked   bool   `json:"revoked"`
+		MaxUses   int    `json:"max_uses"`
+		UseCount  int    `json:"use_count"`
 	}
 	invites := []invitation{}
 	for rows.Next() {
 		var i invitation
-		if err = rows.Scan(&i.ID, &i.ExpiresAt, &i.Used, &i.Revoked); err != nil {
+		if err = rows.Scan(&i.ID, &i.ExpiresAt, &i.MaxUses, &i.UseCount, &i.Used, &i.Revoked); err != nil {
 			fail(w, 500, "Không đọc được lời mời.")
 			return
 		}

@@ -58,13 +58,13 @@ dung file credentials vào chat; chỉ cần thông tin kỹ thuật không nh�
 
 ## 2. Tải gói cài và kiểm tra checksum
 
-Nếu router đã cài v0.1.0, dùng [hướng dẫn nâng cấp v0.1.1](UPGRADE_0.1.1.md)
+Nếu router đã cài v0.1.0 hoặc v0.1.1, dùng [hướng dẫn nâng cấp v0.1.2](UPGRADE_0.1.2.md)
 để giữ cấu hình, tài khoản và website; không chạy lại bước tạo admin.
 
-Tải trực tiếp bản [v0.1.1 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.1):
+Tải trực tiếp bản [v0.1.2 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.2):
 
-- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz).
-- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256).
+- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz).
+- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Dùng thư mục nhận riêng trên router. Ví dụ bên dưới dùng
 `/tmp/guiweb-release`; nếu đã có dữ liệu trong thư mục này, chọn thư mục mới
@@ -73,8 +73,8 @@ và thay đường dẫn tương ứng trong các bước sau. Chạy tải và 
 ```sh
 mkdir -p /tmp/guiweb-release
 cd /tmp/guiweb-release
-wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz'
-wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256'
+wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz'
+wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256'
 sha256sum -c guiweb-openwrt-arm64.tar.gz.sha256
 ```
 
@@ -147,7 +147,9 @@ Mặc định production giữ trống 512 MiB, giới hạn tổng dữ liệu 
 100 MiB. Quota tính cả staging và bản cũ trong lúc cập nhật; mức này cần phù
 hợp phân vùng đã chọn. Chưa dùng hạn mức tổng 4 GiB khi mount hiện tại chỉ
 có khoảng 1,8 GiB trống.
-Không `chown -R` cả mount hoặc các thư mục của dịch vụ khác.
+Không `chown -R` cả mount hoặc các thư mục của dịch vụ khác. Website do admin
+sở hữu dùng ngân sách chung; giới hạn upload, website và khoảng trống vẫn
+giữ nguyên. Admin cập nhật website thành viên vẫn theo quota của chủ đó.
 
 ## 4. Cấu hình và khởi tạo quản trị viên
 
@@ -292,7 +294,12 @@ vụ cũ; không thay toàn bộ config bằng file này.
 
 Sau khi local và route đều đúng, truy cập HTTPS bằng trình duyệt rồi:
 
-1. Đăng nhập admin, tạo link mời, dùng một tài khoản thành viên.
+1. Đăng nhập admin, vào **Lời mời** và tạo link **Nhiều người**. Giao diện
+   mặc định 20 lượt, cho phép 1–1000; hơn một lượt có hạn 7 ngày, một lượt
+   có hạn 48 giờ. Dùng cùng link tạo hai tài khoản thành viên, kiểm tra số
+   đăng ký thành công và lượt còn lại. Người nhận có thể chuyển tiếp link.
+   Kiểm tra hết lượt, hết hạn và thu hồi đều chặn đăng ký mới; các tài khoản
+   tạo từ link không có quyền admin.
 2. Chọn HTML đơn hoặc ZIP có CSS/JS bằng nút chọn file, và chọn thư mục có
    đường dẫn tài nguyên tuyệt đối bằng nút chọn thư mục. Giao diện phải tự
    nhận dạng nội dung; không yêu cầu chọn HTML/ZIP/thư mục bằng radio.
@@ -324,10 +331,17 @@ trình duyệt. Khi slug được dùng lại, người xem có thể cần xóa
 
 ## 8. Nâng cấp, quên mật khẩu và quay lại bản cũ
 
-Từ v0.1.0 lên v0.1.1, xem [các lệnh nâng cấp và quay lại](UPGRADE_0.1.1.md).
-Bản mới tự dọn các tên giữ chỗ không còn website. DB vẫn tương thích v0.1.0;
-quay lại binary cũ không cần khôi phục DB hoặc ghi đè config. Giao diện upload
-v0.1.1 cũng tự nhận dạng HTML, ZIP hoặc nội dung thư mục được chọn.
+Từ v0.1.0 hoặc v0.1.1 lên v0.1.2, xem [các lệnh nâng cấp và quay lại](UPGRADE_0.1.2.md).
+Bản mới bổ sung cột đếm lượt đăng ký, giữ schema version 1 và dữ liệu cũ.
+Quay lại binary v0.1.0/v0.1.1 không cần khôi phục DB hoặc ghi đè config,
+nhưng link nhiều lượt không đăng ký được trên bản cũ. Số lượt đã dùng được
+giữ lại; khi chạy v0.1.2 trở lại, link tiếp tục dùng nếu còn hạn/lượt và chưa
+bị thu hồi. [Hướng dẫn v0.1.1](UPGRADE_0.1.1.md) vẫn được giữ để tham khảo.
+
+Sau nâng cấp, tải lại trang quản lý một lần bằng **Ctrl+Shift+R**. v0.1.2
+dùng URL JS/CSS theo nội dung để tránh HTML mới đi cùng JS cũ trong cache,
+nguyên nhân khiến nút tải lên không phản hồi. Sửa cache và đổi quota admin
+là hai thay đổi riêng.
 
 Quên mật khẩu: chạy CLI trong terminal dưới tài khoản dịch vụ, thay `admin`
 bằng tài khoản cần đặt lại. Dừng riêng GửiWeb trước vì ứng dụng khóa thư mục

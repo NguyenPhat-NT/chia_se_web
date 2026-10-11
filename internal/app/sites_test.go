@@ -679,6 +679,112 @@ func TestUploadQuotasAndCrashReconciliation(t *testing.T) {
 	}
 }
 
+func TestAdminUploadsUseGlobalStorageRatherThanMemberQuota(t *testing.T) {
+	s, member, _, admin := newSitesServer(t)
+	s.cfg.UserBytes = 6
+	s.cfg.SiteBytes = 16
+	s.cfg.UploadBytes = 32
+	previous := createTestSite(t, s, admin, "admin-first", testUploadFile{"index.html", []byte("old!")})
+	// The same file fits a member's quota while the admin's existing files
+	// already make the next upload exceed the per-member limit.
+	createTestSite(t, s, member, "member-first", testUploadFile{"index.html", []byte("html")})
+	createTestSite(t, s, admin, "admin-second", testUploadFile{"index.html", []byte("html")})
+	r := uploadRequest(t, admin, nil, testUploadFile{"index.html", []byte("ADMINNEW")})
+	r.SetPathValue("id", previous.ID)
+	w := httptest.NewRecorder()
+	s.replaceSite(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin replacement hit member quota: %d %s", w.Code, w.Body.String())
+	}
+	active, err := s.siteByID(previous.ID)
+	if err != nil || active.OwnerID != admin.ID || active.SizeBytes != 8 || active.URL != previous.URL {
+		t.Fatalf("admin replacement identity/content: %+v %v", active, err)
+	}
+	if response := publicRequest(s, "admin-first.localhost", "/", ""); response.Body.String() != "ADMINNEW" {
+		t.Fatalf("admin replacement not served: %s", response.Body.String())
+	}
+	r = uploadRequest(t, member, map[string]string{"name": "over quota", "slug": "member-second"}, testUploadFile{"index.html", []byte("html")})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("member quota bypassed: %d %s", w.Code, w.Body.String())
+	}
+	// Admin quota exemption must not bypass limits on a single website/upload.
+	r = uploadRequest(t, admin, map[string]string{"name": "large site", "slug": "admin-large"}, testUploadFile{"index.html", bytes.Repeat([]byte("a"), 17)})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("admin bypassed per-site limit: %d %s", w.Code, w.Body.String())
+	}
+	s.cfg.UploadBytes = 5
+	r = uploadRequest(t, admin, map[string]string{"name": "large upload", "slug": "admin-upload"}, testUploadFile{"index.html", []byte("123456")})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("admin bypassed upload limit: %d %s", w.Code, w.Body.String())
+	}
+	s.cfg.UploadBytes = 32
+	baseline, err := directoryBytes(s.cfg.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.TotalBytes = baseline + 2
+	r = uploadRequest(t, admin, map[string]string{"name": "disk full", "slug": "admin-total"}, testUploadFile{"index.html", []byte("123")})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("admin bypassed physical total quota: %d %s", w.Code, w.Body.String())
+	}
+	s.cfg.TotalBytes = 512 * MiB
+	s.cfg.MinFreeBytes = 1 << 62
+	r = uploadRequest(t, admin, map[string]string{"name": "reserve disk", "slug": "admin-reserve"}, testUploadFile{"index.html", []byte("123")})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("admin bypassed minimum free storage: %d %s", w.Code, w.Body.String())
+	}
+	if response := publicRequest(s, "admin-first.localhost", "/", ""); response.Body.String() != "ADMINNEW" {
+		t.Fatalf("failed admin uploads damaged active content: %s", response.Body.String())
+	}
+	staged, err := os.ReadDir(filepath.Join(s.cfg.DataDir, "staging"))
+	if err != nil || len(staged) != 0 {
+		t.Fatalf("quota failures left staging: %v %v", staged, err)
+	}
+}
+
+func TestAdminReplacingMemberSiteKeepsOwnersQuota(t *testing.T) {
+	s, member, _, admin := newSitesServer(t)
+	s.cfg.UserBytes = 6
+	s.cfg.SiteBytes = 16
+	s.cfg.UploadBytes = 32
+	previous := createTestSite(t, s, member, "member-owned", testUploadFile{"index.html", []byte("OLD!")})
+	createTestSite(t, s, member, "member-other", testUploadFile{"index.html", []byte("S")})
+	r := uploadRequest(t, admin, nil, testUploadFile{"index.html", []byte("sixsix")})
+	r.SetPathValue("id", previous.ID)
+	w := httptest.NewRecorder()
+	s.replaceSite(w, r)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("admin bypassed actual member owner's quota: %d %s", w.Code, w.Body.String())
+	}
+	if response := publicRequest(s, "member-owned.localhost", "/", ""); response.Body.String() != "OLD!" {
+		t.Fatalf("failed admin replacement lost member's content: %s", response.Body.String())
+	}
+	r = uploadRequest(t, admin, nil, testUploadFile{"index.html", []byte("valid")})
+	r.SetPathValue("id", previous.ID)
+	w = httptest.NewRecorder()
+	s.replaceSite(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin replacement within owner's quota failed: %d %s", w.Code, w.Body.String())
+	}
+	current, err := s.siteByID(previous.ID)
+	if err != nil || current.OwnerID != member.ID || current.URL != previous.URL || current.SizeBytes != 5 {
+		t.Fatalf("admin replacement transferred ownership or link: %+v %v", current, err)
+	}
+	if response := publicRequest(s, "member-owned.localhost", "/", ""); response.Body.String() != "valid" {
+		t.Fatalf("valid member replacement not served: %s", response.Body.String())
+	}
+}
+
 func TestSlugReservationAndMultipartPaths(t *testing.T) {
 	s, owner, _, _ := newSitesServer(t)
 	s.cfg.Reserved = append(s.cfg.Reserved, "in4")

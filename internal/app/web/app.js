@@ -137,7 +137,7 @@
     $('password').autocomplete = registering ? 'new-password' : 'current-password';
     $('password').minLength = registering ? 12 : 1;
     $('password').maxLength = 72;
-    $('auth-footnote').textContent = registering ? 'Link mời dùng một lần và có thời hạn. Nếu link không dùng được, hãy nhờ chủ GửiWeb gửi link mới.' : 'Chưa có tài khoản? Nhờ chủ GửiWeb gửi bạn một link mời.';
+    $('auth-footnote').textContent = registering ? 'Link mời có giới hạn lượt tham gia và có thời hạn. Nếu link không dùng được, hãy nhờ người mời gửi link mới.' : 'Chưa có tài khoản? Nhờ chủ GửiWeb gửi bạn một link mời.';
     showError('auth-error');
   }
 
@@ -306,10 +306,9 @@
       const row = element('div', 'invite-row');
       const info = element('div', 'invite-info');
       const detail = element('div');
-      const expired = new Date(invite.expires_at).getTime() <= Date.now();
-      const active = !invite.used && !invite.revoked && !expired;
-      const label = invite.used ? 'Đã sử dụng' : invite.revoked ? 'Đã thu hồi' : expired ? 'Đã hết hạn' : 'Chờ tham gia';
-      detail.append(element('strong', '', `Lời mời ${String(index + 1).padStart(2, '0')}`), element('span', 'field-hint', `Hết hạn ${dateTime(invite.expires_at)}`));
+      const { count, max, active, label } = inviteStats(invite);
+      detail.append(element('strong', '', `Lời mời ${String(index + 1).padStart(2, '0')}`), element('span', 'invite-usage', `${count}/${max} lượt đã dùng`), element('span', 'field-hint', `Hết hạn ${dateTime(invite.expires_at)}`));
+      if ($('new-invite-result').dataset.id === String(invite.id)) renderNewInviteUsage(invite);
       info.append(element('span', 'invite-number', String(index + 1).padStart(2, '0')), detail);
       const actions = element('div', 'invite-row-actions');
       actions.append(element('span', `invite-status${active ? ' active' : ''}`, label));
@@ -332,6 +331,24 @@
       row.append(info, actions);
       return row;
     }));
+  }
+
+  function inviteStats(invite) {
+    const max = Number.isInteger(invite.max_uses) && invite.max_uses > 0 ? invite.max_uses : 1;
+    const count = Number.isInteger(invite.use_count) && invite.use_count >= 0 ? invite.use_count : invite.used ? 1 : 0;
+    const remaining = Math.max(0, max - count);
+    const expired = new Date(invite.expires_at).getTime() <= Date.now();
+    const exhausted = Boolean(invite.used) || remaining === 0;
+    const active = !invite.revoked && !expired && !exhausted;
+    const label = invite.revoked ? 'Đã thu hồi' : expired ? 'Đã hết hạn' : exhausted ? max === 1 ? 'Đã sử dụng' : 'Đã đủ lượt' : `Còn ${remaining} lượt`;
+    return { max, count, remaining, expired, exhausted, active, label };
+  }
+
+  function renderNewInviteUsage(invite) {
+    const { max, count, remaining, expired, exhausted, active } = inviteStats(invite);
+    $('invite-result-usage').textContent = `Đã dùng ${count}/${max} lượt${active ? ` · Còn ${remaining} lượt tham gia` : ''}.`;
+    $('invite-result-expiry').textContent = `Hết hạn ${dateTime(invite.expires_at)}.`;
+    $('invite-result-hint').textContent = invite.revoked ? 'Link đã được thu hồi.' : expired ? 'Link đã hết hạn. Tạo link mới nếu muốn mời thêm người.' : exhausted ? 'Link đã dùng đủ lượt. Tạo link mới để mời thêm người.' : max > 1 ? `Link dùng chung cho tối đa ${max} tài khoản. Người nhận có thể chuyển tiếp cho bạn bè.` : 'Link chỉ dùng cho một tài khoản. Hãy gửi trực tiếp cho người bạn muốn mời.';
   }
 
   function setDialogBusy(dialog, busy) {
@@ -605,23 +622,50 @@
     finally { $('logout-button').disabled = false; }
   });
 
-  $('create-invite-button').addEventListener('click', async () => {
-    $('create-invite-button').disabled = true;
+  let creatingInvite = false;
+
+  function updateInviteKind() {
+    const single = document.querySelector('input[name="invite-kind"]:checked').value === 'single';
+    $('invite-capacity-field').hidden = single;
+    $('invite-max-uses').disabled = single || creatingInvite;
+    const duration = single || Number($('invite-max-uses').value) === 1 ? '48 giờ' : '7 ngày';
+    $('invite-create-hint').textContent = single ? 'Một người có thể tạo tài khoản từ link này. Link hết hạn sau 48 giờ.' : `Người nhận có thể chuyển tiếp cho bạn bè. Chọn 1–1000 lượt tham gia; link hết hạn sau ${duration}.`;
+  }
+
+  document.querySelectorAll('input[name="invite-kind"]').forEach(input => input.addEventListener('change', updateInviteKind));
+  $('invite-max-uses').addEventListener('input', updateInviteKind);
+
+  $('invite-create-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (creatingInvite) return;
+    const single = document.querySelector('input[name="invite-kind"]:checked').value === 'single';
+    const maxUses = single ? 1 : Number($('invite-max-uses').value);
+    if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 1000) { showError('invites-error', 'Hãy chọn từ 1 đến 1000 lượt tham gia.'); $('invite-max-uses').focus(); return; }
+    creatingInvite = true;
+    $('invite-create-form').querySelectorAll('input,button').forEach(control => { control.disabled = true; });
+    $('invite-create-form').setAttribute('aria-busy', 'true');
     showError('invites-error');
     try {
-      const data = await api('/api/invites', { method: 'POST', body: {} });
+      const data = await api('/api/invites', { method: 'POST', body: { max_uses: maxUses } });
+      if (!state.user?.admin) return;
       const url = safeURL(data.url);
       if (!url) throw new Error('Link mời chưa hợp lệ. Hãy kiểm tra cấu hình địa chỉ của GửiWeb.');
       $('invite-url').value = url.href;
-      $('invite-result-expiry').textContent = `Dùng được đến ${dateTime(data.expires_at)}.`;
+      renderNewInviteUsage(data);
       $('new-invite-result').hidden = false;
       $('new-invite-result').dataset.id = String(data.id);
       await refreshInvites();
+      if (!state.user?.admin) return;
       $('invite-url').focus();
       $('invite-url').select();
       notify('Đã tạo link mời. Sao chép và gửi cho người quen nhé.');
     } catch (error) { if (error.status !== 401) showError('invites-error', error.message); }
-    finally { $('create-invite-button').disabled = false; }
+    finally {
+      creatingInvite = false;
+      $('invite-create-form').querySelectorAll('input,button').forEach(control => { control.disabled = false; });
+      $('invite-create-form').setAttribute('aria-busy', 'false');
+      updateInviteKind();
+    }
   });
 
   $('copy-invite-button').addEventListener('click', () => copyText($('invite-url').value, $('copy-invite-button')));

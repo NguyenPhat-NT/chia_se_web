@@ -6,7 +6,8 @@ nhận link public dạng `tenweb.phatnt.id.vn`. Thiết kế cho router OpenWrt
 
 ## Bản đầu
 
-- Quản trị viên tạo link mời; người nhận tự chọn tài khoản và mật khẩu.
+- Quản trị viên tạo link đăng ký dùng chung hoặc một lần; người nhận tự tạo
+  tài khoản thành viên và có thể chuyển tiếp link cho bạn bè.
 - Thành viên quản lý website của mình; quản trị viên quản lý tất cả.
 - Tự nhận dạng HTML, ZIP hoặc nội dung thư mục sau khi chọn file/thư mục;
   tối đa 50 MiB dữ liệu mỗi lượt, không cần chọn loại upload thủ công.
@@ -24,6 +25,22 @@ Mặc định: 100 MiB sau giải nén, 5.000 file/website, 128 MiB/thành viên
 được xử lý tại một thời điểm. Các mức này dựa trên kết quả chủ router cung cấp:
 `/overlay` hiện có khoảng 1,8 GiB trống, chưa thấy mount riêng có 7 GB khả dụng.
 Cấu hình có thể tăng sau khi xác nhận thêm phân vùng lưu trữ và đo tài nguyên.
+Website do admin sở hữu dùng ngân sách chung, không chịu quota cá nhân 128 MiB;
+các giới hạn upload, website, tổng dung lượng và bộ nhớ trống vẫn áp dụng.
+Admin cập nhật website của thành viên vẫn giữ chủ sở hữu và quota của người đó.
+
+## Link đăng ký
+
+Trong tab **Lời mời**, admin chọn **Nhiều người**, nhập số lượt rồi tạo link.
+Giao diện mặc định 20 lượt; cho phép số nguyên 1–1000. Link có hơn một lượt
+hết hạn sau 7 ngày; chọn **Một người** hoặc 1 lượt thì hết hạn sau 48 giờ.
+Người nhận có thể chuyển tiếp link để bạn bè tự đăng ký; các tài khoản mới
+đều là thành viên, không được cấp quyền admin.
+
+Danh sách hiển thị số đăng ký thành công, số lượt còn lại, thời hạn và trạng
+thái. Link ngừng nhận đăng ký khi hết lượt, hết hạn hoặc bị admin thu hồi.
+Thu hồi không xóa các tài khoản đã đăng ký. Sao chép link ngay sau khi tạo
+và gửi qua kênh bạn đang dùng.
 
 ## Phát triển trong cloud
 
@@ -76,18 +93,18 @@ curl --fail --silent --show-error -H 'Host: app.localhost' http://127.0.0.1:8088
 
 ## Build và cài lên router
 
-Tải trực tiếp bản [v0.1.1 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.1):
+Tải trực tiếp bản [v0.1.2 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.2):
 
-- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz).
-- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256).
+- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz).
+- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Có thể dùng `wget` trên router để tải hai file, kiểm tra SHA-256 trước khi
 giải nén; lệnh đầy đủ nằm trong [hướng dẫn OpenWrt](docs/OPENWRT.md#2-tải-gói-cài-và-kiểm-tra-checksum).
 Gói gồm binary, checksum, cấu hình và script dịch vụ; chưa tự cài lên router.
 
-Đang dùng v0.1.0: xem [hướng dẫn nâng cấp v0.1.1](docs/UPGRADE_0.1.1.md).
-Bản mới tự giải phóng cả những slug đã xóa từ v0.1.0; giữ tài khoản, cấu hình
-và website đang có. Giao diện upload tự nhận dạng nội dung được chọn.
+Đang dùng v0.1.0 hoặc v0.1.1: xem [hướng dẫn nâng cấp v0.1.2](docs/UPGRADE_0.1.2.md).
+Giữ tài khoản, cấu hình và website đang có; không tạo lại admin. Hướng dẫn
+[nâng cấp v0.1.1](docs/UPGRADE_0.1.1.md) được giữ để tham khảo lịch sử.
 
 Nếu muốn tự build trong checkout:
 
@@ -122,7 +139,8 @@ thể chạy JavaScript trên trình duyệt, vì vậy chỉ mời người que
 
 ## Vận hành
 
-- Link mời là thông tin truy cập: tự gửi cho người nhận, không đưa lên Git hoặc log.
+- Link đăng ký có thể chuyển tiếp cho bạn bè trong số lượt và thời hạn đã
+  đặt; admin có thể thu hồi để ngừng đăng ký mới. Không đưa token vào Git/log.
 - Quên mật khẩu: chủ router dùng `guiweb reset-password -config <path> -username <name>`
   trong terminal sau khi dừng riêng dịch vụ GửiWeb, rồi khởi động lại dịch vụ;
   mật khẩu không nằm trong tham số dòng lệnh.

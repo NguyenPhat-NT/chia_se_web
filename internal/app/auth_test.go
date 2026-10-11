@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -19,6 +20,16 @@ type authTestSession struct {
 	cookie *http.Cookie
 	csrf   string
 	user   User
+}
+
+type authTestInvitation struct {
+	ID        string `json:"id"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+	MaxUses   int    `json:"max_uses"`
+	UseCount  int    `json:"use_count"`
+	Used      bool   `json:"used"`
+	Revoked   bool   `json:"revoked"`
 }
 
 func authTestServer(t *testing.T) *Server {
@@ -109,11 +120,26 @@ func authTestLogin(t *testing.T, s *Server, username string) authTestSession {
 
 func authTestInvite(t *testing.T, s *Server, admin authTestSession) (string, string) {
 	t.Helper()
-	w := authTestRequest(s, "POST", "/api/invites", "", &admin, s.cfg.Scheme+"://"+s.cfg.AdminHost, admin.csrf, s.cfg.AdminHost)
+	invite, token := authTestCreateInvite(t, s, admin, "")
+	return invite.ID, token
+}
+
+func authTestCreateInvite(t *testing.T, s *Server, admin authTestSession, body string) (authTestInvitation, string) {
+	t.Helper()
+	w := authTestRequest(s, "POST", "/api/invites", body, &admin, s.cfg.Scheme+"://"+s.cfg.AdminHost, admin.csrf, s.cfg.AdminHost)
 	authTestStatus(t, w, http.StatusCreated)
-	var payload struct{ ID, URL, ExpiresAt string }
+	var payload authTestInvitation
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"id", "url", "expires_at", "max_uses", "use_count", "used", "revoked"} {
+		if _, exists := fields[field]; !exists {
+			t.Fatalf("new invitation missing %q", field)
+		}
 	}
 	u, err := url.Parse(payload.URL)
 	if err != nil {
@@ -123,7 +149,42 @@ func authTestInvite(t *testing.T, s *Server, admin authTestSession) (string, str
 	if len(token) != 43 || payload.ID == "" || u.Host != s.cfg.AdminHost {
 		t.Fatal("invalid invite ID, URL or token")
 	}
-	return payload.ID, token
+	return payload, token
+}
+
+func authTestInviteState(t *testing.T, s *Server, admin authTestSession, inviteID, token string, wantMax, wantCount int, wantRevoked bool) {
+	t.Helper()
+	var storedMax, storedCount int
+	var storedUsed, storedRevoked bool
+	if err := s.db.QueryRow("SELECT max_uses,use_count,used,revoked FROM invites WHERE id=?", inviteID).Scan(&storedMax, &storedCount, &storedUsed, &storedRevoked); err != nil {
+		t.Fatal(err)
+	}
+	wantUsed := wantCount >= wantMax
+	wantStoredUsed := wantMax > 1 || wantUsed
+	if storedMax != wantMax || storedCount != wantCount || storedUsed != wantStoredUsed || storedRevoked != wantRevoked {
+		t.Fatalf("stored invitation state = max %d, count %d, used %v, revoked %v; want %d, %d, %v, %v", storedMax, storedCount, storedUsed, storedRevoked, wantMax, wantCount, wantStoredUsed, wantRevoked)
+	}
+	w := authTestRequest(s, "GET", "/api/invites", "", &admin, "", "", s.cfg.AdminHost)
+	authTestStatus(t, w, http.StatusOK)
+	if strings.Contains(w.Body.String(), token) || strings.Contains(w.Body.String(), tokenHash(token)) {
+		t.Fatal("listing exposes invitation secrets")
+	}
+	var payload struct {
+		Invites []authTestInvitation `json:"invites"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range payload.Invites {
+		if value.ID != inviteID {
+			continue
+		}
+		if value.MaxUses != wantMax || value.UseCount != wantCount || value.Used != wantUsed || value.Revoked != wantRevoked || value.URL != "" {
+			t.Fatal("listed invitation state differs from storage or exposes the signup URL")
+		}
+		return
+	}
+	t.Fatal("invitation missing from admin listing")
 }
 
 func authTestRegister(t *testing.T, s *Server, token, username string) *httptest.ResponseRecorder {
@@ -545,5 +606,297 @@ func TestCloudflareAddressTrustAndRateLimit(t *testing.T) {
 	s.rateMu.Unlock()
 	if count != 31 || peerCount != 30 {
 		t.Fatal("spoofed headers created visitor counters or exceeded the IP limit")
+	}
+}
+
+func TestInviteOptionsAndDefaults(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	for _, test := range []struct {
+		name, body string
+		maxUses    int
+		duration   time.Duration
+	}{
+		{"legacy-empty", "", 1, 48 * time.Hour},
+		{"empty-options", "{}", 1, 48 * time.Hour},
+		{"explicit-single-use", `{"max_uses":1}`, 1, 48 * time.Hour},
+		{"reusable-minimum", `{"max_uses":2}`, 2, 7 * 24 * time.Hour},
+		{"reusable-ui-default", `{"max_uses":20}`, 20, 7 * 24 * time.Hour},
+		{"reusable-maximum", `{"max_uses":1000}`, 1000, 7 * 24 * time.Hour},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before := time.Now().UTC()
+			invite, token := authTestCreateInvite(t, s, admin, test.body)
+			if invite.MaxUses != test.maxUses || invite.UseCount != 0 || invite.Used || invite.Revoked {
+				t.Fatal("new invitation capacity/state differs from its request")
+			}
+			expiry, err := time.Parse(time.RFC3339, invite.ExpiresAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delta := expiry.Sub(before.Add(test.duration)); delta < -time.Second || delta > time.Second {
+				t.Fatalf("invitation expiry differs from duration %s by %s", test.duration, delta)
+			}
+			authTestInviteState(t, s, admin, invite.ID, token, test.maxUses, 0, false)
+		})
+	}
+}
+
+func TestInviteRejectsInvalidOptionsWithoutCreatingRecords(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	for _, body := range []string{
+		`{"max_uses":0}`, `{"max_uses":-1}`, `{"max_uses":1001}`,
+		`{"max_uses":1.5}`, `{"max_uses":20.0}`, `{"max_uses":2e1}`,
+		`{"max_uses":"20"}`, `{"max_uses":true}`, `{"max_uses":null}`, `{"max_uses":[]}`, `{"max_uses":{}}`,
+		`{"max_uses":999999999999999999999999}`, `{"unknown":20}`, `{"max_uses":2,"admin":true}`,
+		`null`, `[]`, `true`, `20`, `"20"`, `{`, `{} {}`, " ",
+		`{"max_uses":` + strings.Repeat("1", 5000) + `}`,
+	} {
+		t.Run(body[:min(len(body), 70)], func(t *testing.T) {
+			w := authTestRequest(s, "POST", "/api/invites", body, &admin, "http://app.localhost", admin.csrf, s.cfg.AdminHost)
+			authTestStatus(t, w, http.StatusBadRequest)
+		})
+	}
+	r := httptest.NewRequest("POST", "/api/invites", strings.NewReader(`{"max_uses":20}`))
+	r.Host = s.cfg.AdminHost
+	r.Header.Set("Origin", "http://app.localhost")
+	r.Header.Set("X-CSRF-Token", admin.csrf)
+	r.Header.Set("Content-Type", "text/plain")
+	r.AddCookie(admin.cookie)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	authTestStatus(t, w, http.StatusUnsupportedMediaType)
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM invites").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("invalid invitation options created records")
+	}
+}
+
+func TestReusableInviteForwardingExhaustionAndRollback(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	invite, token := authTestCreateInvite(t, s, admin, `{"max_uses":3}`)
+	alice := authTestDecodeSession(t, s, authTestRegister(t, s, token, "alice"))
+	if alice.user.Admin {
+		t.Fatal("first recipient became an admin")
+	}
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 1, false)
+	// Alice forwards the exact URL she received. No member-only invitation API
+	// or new token is necessary, and forwarding grants no administrative role.
+	forwarded, err := url.Parse(invite.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forwardedToken := forwarded.Query().Get("invite")
+	bob := authTestDecodeSession(t, s, authTestRegister(t, s, forwardedToken, "bob"))
+	if bob.user.Admin {
+		t.Fatal("forwarded link granted admin privileges")
+	}
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 2, false)
+	for _, endpoint := range []struct{ method, path, body string }{
+		{"GET", "/api/invites", ""}, {"POST", "/api/invites", `{"max_uses":1000}`}, {"DELETE", "/api/invites/" + invite.ID, ""},
+	} {
+		authTestStatus(t, authTestRequest(s, endpoint.method, endpoint.path, endpoint.body, &alice, "http://app.localhost", alice.csrf, s.cfg.AdminHost), http.StatusForbidden)
+	}
+	// A username conflict on the last slot must roll back the capacity change.
+	authTestStatus(t, authTestRegister(t, s, forwardedToken, "bob"), http.StatusConflict)
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 2, false)
+	charlie := authTestDecodeSession(t, s, authTestRegister(t, s, forwardedToken, "charlie"))
+	if charlie.user.Admin {
+		t.Fatal("last recipient became an admin")
+	}
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 3, false)
+	authTestStatus(t, authTestRegister(t, s, forwardedToken, "david"), http.StatusBadRequest)
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 3, false)
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 4 {
+		t.Fatal("rejected registrations created users")
+	}
+}
+
+func TestReusableInviteExpiryAndRevocation(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	for _, mode := range []string{"expired", "revoked"} {
+		t.Run(mode, func(t *testing.T) {
+			invite, token := authTestCreateInvite(t, s, admin, `{"max_uses":3}`)
+			authTestDecodeSession(t, s, authTestRegister(t, s, token, mode+"-first"))
+			if mode == "expired" {
+				if _, err := s.db.Exec("UPDATE invites SET expires_at=? WHERE id=?", time.Now().UTC().Add(-time.Minute).Format(time.RFC3339), invite.ID); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				authTestStatus(t, authTestRequest(s, "DELETE", "/api/invites/"+invite.ID, "", &admin, "http://app.localhost", admin.csrf, s.cfg.AdminHost), http.StatusOK)
+			}
+			authTestStatus(t, authTestRegister(t, s, token, mode+"-second"), http.StatusBadRequest)
+			authTestInviteState(t, s, admin, invite.ID, token, 3, 1, mode == "revoked")
+		})
+	}
+}
+
+func TestReusableInviteConcurrentRegistrationIsBounded(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	invite, token := authTestCreateInvite(t, s, admin, `{"max_uses":2}`)
+	// The router deliberately rejects extra bcrypt work instead of accumulating
+	// expensive concurrent hashing. A busy response must not consume a slot.
+	s.passwordMu.Lock()
+	blocked := authTestRegister(t, s, token, "blocked-member")
+	s.passwordMu.Unlock()
+	authTestStatus(t, blocked, http.StatusTooManyRequests)
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 0, false)
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, 8)
+	var tasks sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		body := authTestJSON(t, map[string]string{"token": token, "username": "concurrent-" + strconv.Itoa(i), "password": authTestPassword})
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			<-start
+			results <- authTestRequest(s, "POST", "/api/register", body, nil, "http://app.localhost", "", s.cfg.AdminHost)
+		}()
+	}
+	close(start)
+	tasks.Wait()
+	close(results)
+	succeeded := 0
+	for response := range results {
+		switch response.Code {
+		case http.StatusOK:
+			member := authTestDecodeSession(t, s, response)
+			if member.user.Admin {
+				t.Fatal("concurrent registration granted admin privileges")
+			}
+			succeeded++
+		case http.StatusTooManyRequests, http.StatusBadRequest:
+		default:
+			t.Fatalf("concurrent registration returned unexpected status %d", response.Code)
+		}
+	}
+	if succeeded < 1 || succeeded > 2 {
+		t.Fatalf("concurrent signup succeeded %d times for two slots", succeeded)
+	}
+	authTestInviteState(t, s, admin, invite.ID, token, 2, succeeded, false)
+	for i := succeeded; i < 2; i++ {
+		authTestDecodeSession(t, s, authTestRegister(t, s, token, "sequential-"+strconv.Itoa(i)))
+	}
+	authTestStatus(t, authTestRegister(t, s, token, "after-exhaustion"), http.StatusBadRequest)
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 2, false)
+	var members int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM users WHERE admin=0").Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if members != 2 {
+		t.Fatalf("created %d members for two invite slots", members)
+	}
+}
+
+func TestReusableInviteCountersSurviveRestart(t *testing.T) {
+	cfg := DevConfig(t.TempDir())
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if s != nil {
+			if err := s.Close(); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err := s.CreateAdmin("admin", authTestPassword); err != nil {
+		t.Fatal(err)
+	}
+	admin := authTestLogin(t, s, "admin")
+	invite, token := authTestCreateInvite(t, s, admin, `{"max_uses":2}`)
+	authTestDecodeSession(t, s, authTestRegister(t, s, token, "before-restart"))
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 1, false)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The existing admin session remains valid, just like the stored counters.
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 1, false)
+	authTestDecodeSession(t, s, authTestRegister(t, s, token, "after-restart"))
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 2, false)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authTestStatus(t, authTestRegister(t, s, token, "after-second-restart"), http.StatusBadRequest)
+	authTestInviteState(t, s, admin, invite.ID, token, 2, 2, false)
+}
+
+func TestReusableInviteRemainsClosedToLegacyBinary(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	invite, token := authTestCreateInvite(t, s, admin, `{"max_uses":3}`)
+	assertLegacyClosed := func() {
+		t.Helper()
+		// This is the exact eligibility predicate used by v0.1.1. Rolling back
+		// must not admit an uncounted member through a reusable invitation.
+		var eligible int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM invites WHERE token_hash=? AND expires_at>? AND used=0 AND revoked=0", tokenHash(token), now()).Scan(&eligible); err != nil {
+			t.Fatal(err)
+		}
+		if eligible != 0 {
+			t.Fatal("legacy binary considers a reusable invitation valid")
+		}
+		res, err := s.db.Exec("UPDATE invites SET used=1 WHERE token_hash=? AND expires_at>? AND used=0 AND revoked=0", tokenHash(token), now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if affected, err := res.RowsAffected(); err != nil || affected != 0 {
+			t.Fatalf("legacy registration consumed reusable invitation: %d rows, %v", affected, err)
+		}
+	}
+	assertLegacyClosed()
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 0, false)
+	authTestDecodeSession(t, s, authTestRegister(t, s, token, "new-recipient"))
+	assertLegacyClosed()
+	authTestInviteState(t, s, admin, invite.ID, token, 3, 1, false)
+}
+
+func TestLegacyConsumedSingleInviteIsNotReusable(t *testing.T) {
+	s := authTestServer(t)
+	admin := authTestLogin(t, s, "admin")
+	invite, token := authTestCreateInvite(t, s, admin, "")
+	// An older binary can mark a single-use invite consumed without updating
+	// the additive counter. The new eligibility guard still respects used.
+	if _, err := s.db.Exec("UPDATE invites SET used=1 WHERE id=?", invite.ID); err != nil {
+		t.Fatal(err)
+	}
+	authTestStatus(t, authTestRegister(t, s, token, "blocked-recipient"), http.StatusBadRequest)
+	w := authTestRequest(s, "GET", "/api/invites", "", &admin, "", "", s.cfg.AdminHost)
+	authTestStatus(t, w, http.StatusOK)
+	var payload struct {
+		Invites []authTestInvitation `json:"invites"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Invites) != 1 || !payload.Invites[0].Used {
+		t.Fatal("API reopened a legacy-consumed single invitation")
+	}
+	var members int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM users WHERE admin=0").Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if members != 0 {
+		t.Fatal("legacy-consumed invitation admitted another member")
 	}
 }

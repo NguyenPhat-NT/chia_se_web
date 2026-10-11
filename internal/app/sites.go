@@ -144,10 +144,15 @@ func (s *Server) listSites(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) ownerAllowance(owner string, replacingBytes int64) (int64, error) {
 	var used int64
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(size_bytes),0) FROM sites WHERE owner_id=?`, owner).Scan(&used); err != nil {
+	var admin bool
+	// Quotas follow the website's persisted owner, including when an admin
+	// replaces a member's content. The requesting actor's role is insufficient.
+	if err := s.db.QueryRow(`SELECT u.admin,COALESCE(SUM(s.size_bytes),0) FROM users u LEFT JOIN sites s ON s.owner_id=u.id WHERE u.id=? GROUP BY u.id,u.admin`, owner).Scan(&admin, &used); err != nil {
 		return 0, err
 	}
-	if s.cfg.UserBytes <= 0 {
+	// Admin-owned websites share the global storage budget. prepareUpload still
+	// enforces per-site, upload, physical total and minimum-free-space limits.
+	if admin || s.cfg.UserBytes <= 0 {
 		return s.cfg.SiteBytes, nil
 	}
 	return max(0, s.cfg.UserBytes-used+replacingBytes), nil
