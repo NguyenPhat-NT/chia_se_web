@@ -197,9 +197,9 @@ func (s *Server) createSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var found int
-	err = s.db.QueryRow(`SELECT 1 FROM slug_reservations WHERE slug=?`, upload.slug).Scan(&found)
+	err = s.db.QueryRow(`SELECT 1 FROM sites WHERE slug=?`, upload.slug).Scan(&found)
 	if err == nil {
-		fail(w, http.StatusConflict, "Địa chỉ website này đã được sử dụng.")
+		fail(w, http.StatusConflict, "Địa chỉ website này đang được sử dụng.")
 		return
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -309,7 +309,7 @@ func (s *Server) installRelease(upload preparedUpload, value site, replacing boo
 	if replacing {
 		_, err = tx.Exec(`UPDATE sites SET release_id=?,size_bytes=?,spa=?,updated_at=? WHERE id=?`, value.releaseID, value.SizeBytes, spa, value.UpdatedAt, value.ID)
 	} else {
-		if _, err = tx.Exec(`INSERT INTO slug_reservations(slug,owner_id) VALUES(?,?)`, value.Slug, value.OwnerID); err == nil {
+		if _, err = tx.Exec(`INSERT INTO slug_reservations(slug,owner_id) VALUES(?,?) ON CONFLICT(slug) DO UPDATE SET owner_id=excluded.owner_id`, value.Slug, value.OwnerID); err == nil {
 			_, err = tx.Exec(`INSERT INTO sites(id,owner_id,name,slug,release_id,size_bytes,spa,updated_at) VALUES(?,?,?,?,?,?,?,?)`, value.ID, value.OwnerID, value.Name, value.Slug, value.releaseID, value.SizeBytes, spa, value.UpdatedAt)
 		}
 	}
@@ -407,7 +407,21 @@ func (s *Server) deleteSite(w http.ResponseWriter, r *http.Request) {
 	}
 	s.filesMu.Lock()
 	defer s.filesMu.Unlock()
-	if _, err = s.db.Exec(`DELETE FROM sites WHERE id=?`, value.ID); err != nil {
+	tx, err := s.db.Begin()
+	if err != nil {
+		respondUploadError(w, err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM sites WHERE id=?`, value.ID); err != nil {
+		respondUploadError(w, err)
+		return
+	}
+	if _, err = tx.Exec(`DELETE FROM slug_reservations WHERE slug=?`, value.Slug); err != nil {
+		respondUploadError(w, err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
 		respondUploadError(w, err)
 		return
 	}

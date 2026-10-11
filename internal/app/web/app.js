@@ -2,7 +2,7 @@
 
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { user: null, csrf: '', limits: {}, usage: 0, sites: [], invites: [], tab: 'sites', selectedFiles: [], uploading: false, uploadSite: null, editSite: null, deleteSite: null };
+  const state = { user: null, csrf: '', limits: {}, usage: 0, sites: [], invites: [], tab: 'sites', selectedFiles: [], uploadMode: '', uploading: false, uploadSite: null, editSite: null, deleteSite: null };
   const icons = {
     moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z"/></svg>',
     sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>',
@@ -365,6 +365,7 @@
   function openUpload(site = null) {
     state.uploadSite = site;
     state.selectedFiles = [];
+    state.uploadMode = '';
     state.uploading = false;
     $('upload-form').reset();
     setDialogBusy($('upload-dialog'), false);
@@ -379,49 +380,60 @@
     $('upload-submit').replaceChildren(document.createTextNode(site ? 'Cập nhật website ' : 'Tạo link chia sẻ '), icon('external'));
     $('upload-progress').hidden = true;
     showError('upload-error');
-    setUploadMode();
+    renderFileSelection();
     showDialog($('upload-dialog'));
   }
 
-  function selectedMode() { return document.querySelector('input[name="mode"]:checked').value; }
-
-  function setUploadMode() {
-    const mode = selectedMode();
-    state.selectedFiles = [];
-    const input = $('upload-files');
-    input.value = '';
-    input.removeAttribute('webkitdirectory');
-    input.removeAttribute('directory');
-    input.multiple = mode === 'folder';
-    input.accept = mode === 'zip' ? '.zip,application/zip' : mode === 'html' ? '.html,.htm,text/html' : '';
-    if (mode === 'folder') { input.setAttribute('webkitdirectory', ''); input.setAttribute('directory', ''); }
-    $('file-pick-label').textContent = mode === 'zip' ? 'Chọn file ZIP' : mode === 'folder' ? 'Chọn thư mục website' : 'Chọn file HTML';
-    $('file-pick-hint').textContent = mode === 'folder' ? 'Giữ nguyên các thư mục CSS, JavaScript và hình ảnh' : 'hoặc kéo thả file vào đây';
-    $('upload-limit-hint').textContent = `Tối đa ${bytes(state.limits.upload_bytes || 50 * 1024 ** 2)}/lượt. ${mode === 'html' ? 'File HTML sẽ là trang chính. Các tài nguyên đi kèm cần tải bằng ZIP hoặc thư mục.' : `Cần có index.html. Dung lượng website tối đa ${bytes(state.limits.site_bytes || 100 * 1024 ** 2)}.`}`;
-    showError('upload-error');
-    renderFileSelection();
+  function inferUploadMode(files, source) {
+    if (source === 'folder' || files.some(file => file.webkitRelativePath)) return 'folder';
+    if (files.length > 1) return 'folder';
+    if (/\.zip$/i.test(files[0]?.name || '')) return 'zip';
+    if (/\.html?$/i.test(files[0]?.name || '')) return 'html';
+    return '';
   }
 
-  function chooseFiles(files) {
-    const mode = selectedMode();
-    state.selectedFiles = Array.from(files);
+  function folderHasIndex(files) {
+    const paths = files.map(file => file.webkitRelativePath || file.name);
+    if (paths.includes('index.html')) return true;
+    const wrapper = paths[0]?.split('/')[0];
+    return Boolean(wrapper && paths.every(path => path.startsWith(wrapper + '/')) && paths.includes(wrapper + '/index.html'));
+  }
+
+  function clearFiles() {
+    state.selectedFiles = [];
+    state.uploadMode = '';
+    $('upload-files').value = '';
+    $('upload-folder-files').value = '';
+  }
+
+  function chooseFiles(selection, source = 'files') {
+    const files = Array.from(selection);
+    const mode = inferUploadMode(files, source);
     showError('upload-error');
     let error = '';
-    if (mode !== 'folder' && state.selectedFiles.length !== 1) error = 'Hãy chọn một file duy nhất.';
-    else if (mode === 'zip' && !/\.zip$/i.test(state.selectedFiles[0]?.name || '')) error = 'Hãy chọn file có đuôi .zip.';
-    else if (mode === 'html' && !/\.html?$/i.test(state.selectedFiles[0]?.name || '')) error = 'Hãy chọn file có đuôi .html hoặc .htm.';
-    else if (state.selectedFiles.reduce((sum, file) => sum + file.size, 0) > (state.limits.upload_bytes || 50 * 1024 ** 2)) error = `Nội dung vượt giới hạn ${bytes(state.limits.upload_bytes || 50 * 1024 ** 2)} mỗi lượt. Hãy giảm dung lượng rồi thử lại.`;
-    if (error) { state.selectedFiles = []; $('upload-files').value = ''; showError('upload-error', error); }
+    const size = files.reduce((sum, file) => sum + file.size, 0);
+    if (!files.length) error = 'Chưa có file nào được chọn. Hãy chọn HTML, ZIP hoặc thư mục website.';
+    else if (!mode) error = 'File này chưa phải một website. Hãy chọn file HTML, file ZIP hoặc thư mục chứa index.html.';
+    else if (state.limits.max_files && files.length > state.limits.max_files) error = `Website vượt giới hạn ${state.limits.max_files} file. Hãy bớt file rồi thử lại.`;
+    else if (size > (state.limits.upload_bytes || 50 * 1024 ** 2)) error = `Nội dung vượt giới hạn ${bytes(state.limits.upload_bytes || 50 * 1024 ** 2)} mỗi lượt. Hãy giảm dung lượng rồi thử lại.`;
+    else if (mode === 'folder' && size > (state.limits.site_bytes || 100 * 1024 ** 2)) error = `Website vượt giới hạn ${bytes(state.limits.site_bytes || 100 * 1024 ** 2)}. Hãy giảm dung lượng rồi thử lại.`;
+    else if (mode === 'folder' && !folderHasIndex(files)) error = 'Không tìm thấy index.html ở thư mục gốc. Hãy chọn đầy đủ thư mục website đã build hoặc các file đi cùng index.html.';
+    if (error) { clearFiles(); showError('upload-error', error); }
+    else { state.selectedFiles = files; state.uploadMode = mode; }
     renderFileSelection();
   }
 
   function renderFileSelection() {
     const files = state.selectedFiles;
+    const mode = state.uploadMode;
     $('file-selection').hidden = files.length === 0;
     $('file-dropzone').hidden = files.length !== 0;
+    $('upload-submit').disabled = files.length === 0 || state.uploading;
+    $('upload-limit-hint').textContent = `Tối đa ${bytes(state.limits.upload_bytes || 50 * 1024 ** 2)}/lượt. ${mode === 'html' ? 'File HTML sẽ là trang chính. Các tài nguyên đi kèm cần tải cùng bằng ZIP hoặc thư mục.' : `ZIP, thư mục hoặc nhóm file cần có index.html. Website tối đa ${bytes(state.limits.site_bytes || 100 * 1024 ** 2)}.`}`;
+    $('file-selection-type').textContent = '';
     if (!files.length) return;
-    const mode = selectedMode();
-    $('file-selection-name').textContent = mode === 'folder' ? files[0].webkitRelativePath.split('/')[0] || 'Thư mục website' : files[0].name;
+    $('file-selection-type').textContent = `Đã nhận dạng: ${mode === 'zip' ? 'File ZIP' : mode === 'html' ? 'File HTML' : files.some(file => file.webkitRelativePath) ? 'Thư mục website' : 'Nhóm file website'}`;
+    $('file-selection-name').textContent = mode === 'folder' ? files[0].webkitRelativePath?.split('/')[0] || 'Các file website đã chọn' : files[0].name;
     $('file-selection-size').textContent = `${files.length} file · ${bytes(files.reduce((sum, file) => sum + file.size, 0))}`;
   }
 
@@ -458,13 +470,13 @@
     event.preventDefault();
     if (state.uploading) return;
     showError('upload-error');
-    if (!state.selectedFiles.length) { showError('upload-error', 'Bạn chưa chọn nội dung website.'); $('upload-files').focus(); return; }
+    if (!state.selectedFiles.length) { showError('upload-error', 'Bạn chưa chọn nội dung website.'); $('choose-files-button').focus(); return; }
     if (!state.uploadSite && !$('site-name').value.trim()) { showError('upload-error', 'Hãy nhập tên website.'); $('site-name').focus(); return; }
-    const mode = selectedMode();
+    const mode = state.uploadMode;
     const data = new FormData();
     data.append('mode', mode);
     if (!state.uploadSite) { data.append('name', $('site-name').value.trim()); data.append('slug', $('site-slug').value.trim()); data.append('spa', String($('site-spa').checked)); }
-    for (const file of state.selectedFiles) data.append('files', file, mode === 'folder' ? file.webkitRelativePath : file.name);
+    for (const file of state.selectedFiles) data.append('files', file, mode === 'folder' ? file.webkitRelativePath || file.name : file.name);
     const replacing = Boolean(state.uploadSite);
     const path = replacing ? `/api/sites/${encodeURIComponent(state.uploadSite.id)}/upload` : '/api/sites';
     state.uploading = true;
@@ -475,10 +487,11 @@
     $('upload-progress-percent').textContent = '0%';
     try {
       await sendUpload(path, data);
-      $('upload-dialog').close();
-      notify(replacing ? 'Đã cập nhật website. Link chia sẻ vẫn giữ nguyên.' : 'Website đã sẵn sàng! Sao chép link để chia sẻ nhé.');
+      $('upload-progress-label').textContent = 'Đang cập nhật danh sách website…';
       switchTab('sites');
       await refreshSites();
+      $('upload-dialog').close();
+      if (state.user) notify(replacing ? 'Đã cập nhật website. Link chia sẻ vẫn giữ nguyên.' : 'Website đã sẵn sàng! Sao chép link để chia sẻ nhé.');
     } catch (error) {
       if (error.status !== 401) { showError('upload-error', error.message); $('upload-progress').hidden = true; }
     } finally {
@@ -505,9 +518,9 @@
     showError('edit-error');
     try {
       await api(`/api/sites/${encodeURIComponent(state.editSite.id)}`, { method: 'PATCH', body });
-      $('edit-dialog').close();
-      notify('Đã lưu thay đổi.');
       await refreshSites();
+      $('edit-dialog').close();
+      if (state.user) notify('Đã lưu thay đổi.');
     } catch (error) { if (error.status !== 401) showError('edit-error', error.message); }
     finally { setDialogBusy($('edit-dialog'), false); }
   });
@@ -525,9 +538,9 @@
     showError('delete-error');
     try {
       await api(`/api/sites/${encodeURIComponent(state.deleteSite.id)}`, { method: 'DELETE' });
-      $('delete-dialog').close();
-      notify('Đã xóa website.');
       await refreshSites();
+      $('delete-dialog').close();
+      if (state.user) notify('Đã xóa website.');
     } catch (error) { if (error.status !== 401) showError('delete-error', error.message); }
     finally { setDialogBusy($('delete-dialog'), false); }
   });
@@ -626,20 +639,24 @@
   });
   $('site-name').addEventListener('input', () => { if ($('site-slug').dataset.touched !== 'true') $('site-slug').value = slugify($('site-name').value); });
   $('site-slug').addEventListener('input', () => { $('site-slug').dataset.touched = 'true'; });
-  document.querySelectorAll('input[name="mode"]').forEach(input => input.addEventListener('change', setUploadMode));
-  $('upload-files').addEventListener('change', event => { if (event.target.files.length) chooseFiles(event.target.files); });
-  $('clear-files-button').addEventListener('click', () => { state.selectedFiles = []; $('upload-files').value = ''; renderFileSelection(); $('upload-files').focus(); });
+  $('choose-files-button').addEventListener('click', () => $('upload-files').click());
+  $('choose-folder-button').addEventListener('click', () => $('upload-folder-files').click());
+  $('choose-folder-button').hidden = !('webkitdirectory' in $('upload-folder-files'));
+  $('upload-files').addEventListener('change', event => { if (event.target.files.length) chooseFiles(event.target.files, 'files'); });
+  $('upload-folder-files').addEventListener('change', event => { if (event.target.files.length) chooseFiles(event.target.files, 'folder'); });
+  $('clear-files-button').addEventListener('click', () => { clearFiles(); showError('upload-error'); renderFileSelection(); $('choose-files-button').focus(); });
   $('file-dropzone').addEventListener('dragover', event => {
     event.preventDefault();
-    if (!state.uploading && selectedMode() !== 'folder') $('file-dropzone').classList.add('drag-over');
+    if (!state.uploading) $('file-dropzone').classList.add('drag-over');
   });
   $('file-dropzone').addEventListener('dragleave', () => $('file-dropzone').classList.remove('drag-over'));
   $('file-dropzone').addEventListener('drop', event => {
     event.preventDefault();
     $('file-dropzone').classList.remove('drag-over');
     if (state.uploading) return;
-    if (selectedMode() === 'folder') { showError('upload-error', 'Hãy dùng nút chọn thư mục để giữ đầy đủ cấu trúc website.'); return; }
-    chooseFiles(event.dataTransfer.files);
+    const containsDirectory = Array.from(event.dataTransfer.items || []).some(item => item.webkitGetAsEntry?.()?.isDirectory);
+    if (containsDirectory) { showError('upload-error', 'Hãy dùng “Chọn thư mục” để giữ đầy đủ các file bên trong, hoặc tải lên bản ZIP của website.'); return; }
+    chooseFiles(event.dataTransfer.files, 'files');
   });
 
   async function initialize() {

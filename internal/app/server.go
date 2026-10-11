@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY,token_hash TEXT UNIQUE NO
 CREATE TABLE IF NOT EXISTS sites(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,release_id TEXT NOT NULL,size_bytes INTEGER NOT NULL,spa INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS slug_reservations(slug TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id));
 INSERT OR IGNORE INTO slug_reservations(slug,owner_id) SELECT slug,owner_id FROM sites;
+DELETE FROM slug_reservations WHERE NOT EXISTS (SELECT 1 FROM sites WHERE sites.slug=slug_reservations.slug);
 CREATE INDEX IF NOT EXISTS sites_owner ON sites(owner_id);
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 PRAGMA user_version=1;

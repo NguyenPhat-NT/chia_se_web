@@ -58,10 +58,13 @@ dung file credentials vào chat; chỉ cần thông tin kỹ thuật không nh�
 
 ## 2. Tải gói cài và kiểm tra checksum
 
-Tải trực tiếp bản [v0.1.0 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.0):
+Nếu router đã cài v0.1.0, dùng [hướng dẫn nâng cấp v0.1.1](UPGRADE_0.1.1.md)
+để giữ cấu hình, tài khoản và website; không chạy lại bước tạo admin.
 
-- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz).
-- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256).
+Tải trực tiếp bản [v0.1.1 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.1):
+
+- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz).
+- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Dùng thư mục nhận riêng trên router. Ví dụ bên dưới dùng
 `/tmp/guiweb-release`; nếu đã có dữ liệu trong thư mục này, chọn thư mục mới
@@ -70,8 +73,8 @@ và thay đường dẫn tương ứng trong các bước sau. Chạy tải và 
 ```sh
 mkdir -p /tmp/guiweb-release
 cd /tmp/guiweb-release
-wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz'
-wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256'
+wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz'
+wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256'
 sha256sum -c guiweb-openwrt-arm64.tar.gz.sha256
 ```
 
@@ -290,12 +293,15 @@ vụ cũ; không thay toàn bộ config bằng file này.
 Sau khi local và route đều đúng, truy cập HTTPS bằng trình duyệt rồi:
 
 1. Đăng nhập admin, tạo link mời, dùng một tài khoản thành viên.
-2. Upload HTML đơn, ZIP có CSS/JS và thư mục có đường dẫn tài nguyên tuyệt đối.
+2. Chọn HTML đơn hoặc ZIP có CSS/JS bằng nút chọn file, và chọn thư mục có
+   đường dẫn tài nguyên tuyệt đối bằng nút chọn thư mục. Giao diện phải tự
+   nhận dạng nội dung; không yêu cầu chọn HTML/ZIP/thư mục bằng radio.
 3. Mở từng link bằng người xem không đăng nhập, kiểm tra CSS/JS tải đúng.
 4. Đổi tên và cập nhật: link giữ nguyên, nội dung mới xuất hiện; upload lỗi giữ bản cũ.
 5. Kiểm tra thành viên không quản lý được website của người khác, xóa thu hồi link.
-   Slug đã xóa được giữ vĩnh viễn trong DB, không cấp lại cho website khác để
-   link cũ không vô tình trỏ sang nội dung mới.
+   Sau khi xóa, thử tạo lại cùng slug bằng tài khoản khác: phải thành công
+   và link cũ hiển thị website mới. Tên đang dùng vẫn duy nhất; các tên dành
+   riêng như `app`, `in4` vẫn bị chặn.
 6. Thử một upload hợp lệ gần 50 MiB; giới hạn Cloudflare tính cả multipart nên
    cần lớn hơn tổng file một chút. Giới hạn/timeout phụ thuộc cấu hình thực tế.
 7. Kiểm tra CPU/RAM/disk khi upload và xem website cùng lúc, đo chức năng mạng.
@@ -312,7 +318,16 @@ Chưa cam kết mức truy cập đồng thời khi chưa có số đo. Bắt đ
 dùng và website nhỏ. Nếu thiếu RAM/CPU, hạ hạn mức sau khi đo; không tắt kiểm
 tra upload hoặc xác thực để làm cho test vượt qua.
 
+Xóa trên router không xóa `localStorage` hoặc service worker đã lưu trên
+trình duyệt. Khi slug được dùng lại, người xem có thể cần xóa dữ liệu trang
+để loại bỏ dữ liệu/cache cũ.
+
 ## 8. Nâng cấp, quên mật khẩu và quay lại bản cũ
+
+Từ v0.1.0 lên v0.1.1, xem [các lệnh nâng cấp và quay lại](UPGRADE_0.1.1.md).
+Bản mới tự dọn các tên giữ chỗ không còn website. DB vẫn tương thích v0.1.0;
+quay lại binary cũ không cần khôi phục DB hoặc ghi đè config. Giao diện upload
+v0.1.1 cũng tự nhận dạng HTML, ZIP hoặc nội dung thư mục được chọn.
 
 Quên mật khẩu: chạy CLI trong terminal dưới tài khoản dịch vụ, thay `admin`
 bằng tài khoản cần đặt lại. Dừng riêng GửiWeb trước vì ứng dụng khóa thư mục

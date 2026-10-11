@@ -1,22 +1,24 @@
-GửiWeb cho nhóm người quen chia sẻ website tĩnh trên OpenWrt/Kwrt.
+GửiWeb v0.1.1 cho phép dùng lại tên website đã xóa và tự nhận dạng nội dung upload.
 
-- Tài khoản qua link mời một lần; thành viên quản lý website của mình, admin quản lý tất cả.
-- Upload HTML, ZIP hoặc thư mục; đổi tên, xóa và cập nhật giữ nguyên link.
-- Giao diện tiếng Việt, sáng/tối, hỗ trợ điện thoại.
-- Go + SQLite, binary Linux ARM64 tĩnh, không cần Node.js trên router.
+- Xóa website giải phóng slug trong cùng transaction. Bất kỳ thành viên nào
+  cũng có thể tạo website mới bằng tên vừa xóa.
+- Khi khởi động, tự dọn những slug giữ chỗ từ v0.1.0 không còn website tương
+  ứng. Website đang có, tài khoản và cấu hình được giữ nguyên.
+- Tên đang sử dụng vẫn duy nhất. Các tên dành riêng như `app`, `in4`, `www`,
+  `api`, `admin` và các tên trong cấu hình vẫn bị chặn.
+- Giao diện tự nhận dạng HTML/ZIP khi chọn file, hoặc nội dung khi chọn thư
+  mục; không cần chọn loại upload thủ công. Cả tạo mới và cập nhật đều dùng
+  cách chọn này.
 
-Tải **guiweb-openwrt-arm64.tar.gz** và file **.sha256** đi kèm. Gói chứa binary,
-checksum binary, cấu hình, dịch vụ procd và đoạn route Tunnel bổ sung.
+Nếu một slug được dùng lại, link cũ hiển thị website mới. Xóa trên router
+không xóa `localStorage` hoặc service worker lưu trong trình duyệt người xem.
 
-Cấu hình đã điền `app.phatnt.id.vn` và `phatnt.id.vn`, dành riêng `in4` cho
-dịch vụ hiện có. Dữ liệu tại `/overlay/guiweb`; upload 50 MiB, website 100 MiB,
-thành viên 128 MiB, tổng dữ liệu 512 MiB. Kiểm tra lại cấu hình trước khi cài.
-Không có mật khẩu mặc định; tạo admin bằng CLI tại lời nhắc ẩn.
+Tải **guiweb-openwrt-arm64.tar.gz** và file **.sha256** đi kèm. Với router đã
+cài v0.1.0, chỉ thay binary sau khi kiểm tra checksum; giữ
+`/etc/guiweb/config.json` và `/overlay/guiweb`. Không cần tạo lại admin, reset
+mật khẩu hoặc thay Tunnel. DB vẫn tương thích binary v0.1.0 nếu cần quay lại.
 
-Kiểm chứng cloud: 24 bài test, 144 ca tính cả subtest và kiểm tra race đạt;
-luồng trình duyệt, upload đúng 50 MiB và dữ liệu sau restart đạt.
+Chưa xác nhận nâng cấp trên router thật.
 
-Chưa kiểm chứng trên router thật hoặc public HTTPS. Cài theo
-[hướng dẫn OpenWrt](https://github.com/NguyenPhat-NT/chia_se_web/blob/main/docs/OPENWRT.md).
-Giữ nguyên route/DNS của `in4.phatnt.id.vn`, đặt các route cụ thể trước wildcard.
-Không format hoặc thay đổi phân vùng để cài ứng dụng.
+[Hướng dẫn nâng cấp v0.1.1](https://github.com/NguyenPhat-NT/chia_se_web/blob/v0.1.1/docs/UPGRADE_0.1.1.md).
+[Hướng dẫn cài mới OpenWrt](https://github.com/NguyenPhat-NT/chia_se_web/blob/v0.1.1/docs/OPENWRT.md).

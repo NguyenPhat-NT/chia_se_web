@@ -110,7 +110,7 @@ func (s *Server) mePayload(u User, csrf string) (map[string]any, error) {
 	} else {
 		err = s.db.QueryRow("SELECT COALESCE(SUM(size_bytes),0) FROM sites WHERE owner_id=?", u.ID).Scan(&used)
 	}
-	return map[string]any{"user": u, "csrf": csrf, "limits": map[string]any{"upload_bytes": s.cfg.UploadBytes, "site_bytes": s.cfg.SiteBytes, "total_bytes": s.cfg.TotalBytes, "user_bytes": s.cfg.UserBytes}, "usage_bytes": used}, err
+	return map[string]any{"user": u, "csrf": csrf, "limits": map[string]any{"upload_bytes": s.cfg.UploadBytes, "site_bytes": s.cfg.SiteBytes, "total_bytes": s.cfg.TotalBytes, "user_bytes": s.cfg.UserBytes, "max_files": s.cfg.MaxFiles}, "usage_bytes": used}, err
 }
 
 func (s *Server) respondMe(w http.ResponseWriter, u User, csrf string) {

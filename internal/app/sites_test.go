@@ -246,8 +246,193 @@ func TestHTMLReplaceRollbackAndOwnership(t *testing.T) {
 	r = uploadRequest(t, other, map[string]string{"name": "replacement owner", "slug": "stable"}, testUploadFile{"index.html", []byte("new owner")})
 	w = httptest.NewRecorder()
 	s.createSite(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("deleted slug was not released for another member: %d %s", w.Code, w.Body.String())
+	}
+	if response := publicRequest(s, "stable.localhost", "/", ""); response.Code != http.StatusOK || response.Body.String() != "new owner" {
+		t.Fatalf("reused hostname did not serve new content: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func deleteTestSite(t *testing.T, s *Server, user User, id string) {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodDelete, "http://app.localhost/api/sites/"+id, nil)
+	r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, user))
+	r.SetPathValue("id", id)
+	w := httptest.NewRecorder()
+	s.deleteSite(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeletedSlugReusableByAnyMember(t *testing.T) {
+	for _, role := range []string{"owner", "member", "admin"} {
+		t.Run(role, func(t *testing.T) {
+			s, owner, member, admin := newSitesServer(t)
+			previous := createTestSite(t, s, owner, "reusable", testUploadFile{"index.html", []byte("previous website")})
+			deleteTestSite(t, s, admin, previous.ID)
+			if response := publicRequest(s, "reusable.localhost", "/", ""); response.Code != http.StatusNotFound {
+				t.Fatalf("deleted website still public: %d", response.Code)
+			}
+			user := owner
+			switch role {
+			case "member":
+				user = member
+			case "admin":
+				user = admin
+			}
+			current := createTestSite(t, s, user, "reusable", testUploadFile{"index.html", []byte("new website by " + role)})
+			if current.ID == previous.ID || current.URL != previous.URL || current.OwnerID != user.ID {
+				t.Fatalf("recreation did not preserve URL with a new owner/id: old=%+v new=%+v", previous, current)
+			}
+			if response := publicRequest(s, "reusable.localhost", "/", ""); response.Code != http.StatusOK || response.Body.String() != "new website by "+role {
+				t.Fatalf("reused URL content: %d %s", response.Code, response.Body.String())
+			}
+			for _, contender := range []User{owner, member, admin} {
+				r := uploadRequest(t, contender, map[string]string{"name": "duplicate", "slug": "reusable"}, testUploadFile{"index.html", []byte("must not replace")})
+				w := httptest.NewRecorder()
+				s.createSite(w, r)
+				if w.Code != http.StatusConflict {
+					t.Fatalf("active name claimed by %s: %d %s", contender.Username, w.Code, w.Body.String())
+				}
+			}
+			if response := publicRequest(s, "reusable.localhost", "/", ""); response.Body.String() != "new website by "+role {
+				t.Fatalf("duplicate create changed active content: %s", response.Body.String())
+			}
+		})
+	}
+}
+
+func TestLegacyDeletedSlugReleasedAfterRestart(t *testing.T) {
+	s, owner, member, _ := newSitesServer(t)
+	active := createTestSite(t, s, owner, "kept-live", testUploadFile{"index.html", []byte("preserved live website")})
+	// v0.1.0 kept a reservation after deleting the site. Its existing two-column
+	// table and schema version must remain readable without a manual DB edit.
+	if _, err := s.db.Exec(`INSERT INTO slug_reservations(slug,owner_id) VALUES(?,?)`, "legacy-deleted", owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil || version != 1 {
+		t.Fatalf("legacy schema fixture version: %d %v", version, err)
+	}
+	cfg := s.cfg
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	current := createTestSite(t, reopened, member, "legacy-deleted", testUploadFile{"index.html", []byte("reclaimed after restart")})
+	if current.OwnerID != member.ID {
+		t.Fatalf("legacy owner prevented transfer: %+v", current)
+	}
+	if response := publicRequest(reopened, "legacy-deleted.localhost", "/", ""); response.Code != http.StatusOK || response.Body.String() != "reclaimed after restart" {
+		t.Fatalf("legacy reused URL: %d %s", response.Code, response.Body.String())
+	}
+	r := uploadRequest(t, member, map[string]string{"name": "duplicate", "slug": "kept-live"}, testUploadFile{"index.html", []byte("must not replace")})
+	w := httptest.NewRecorder()
+	reopened.createSite(w, r)
 	if w.Code != http.StatusConflict {
-		t.Fatalf("deleted slug reused across origins: %d %s", w.Code, w.Body.String())
+		t.Fatalf("restart released an active name: %d %s", w.Code, w.Body.String())
+	}
+	if response := publicRequest(reopened, "kept-live.localhost", "/", ""); response.Body.String() != "preserved live website" {
+		t.Fatalf("restart damaged active content: %s", response.Body.String())
+	}
+	if value, err := reopened.siteByID(active.ID); err != nil || value.ID != active.ID {
+		t.Fatalf("restart changed active site identity: %+v %v", value, err)
+	}
+}
+
+func TestFailedSlugRecreationLeavesNameAvailable(t *testing.T) {
+	s, owner, member, admin := newSitesServer(t)
+	previous := createTestSite(t, s, owner, "retry-slug", testUploadFile{"index.html", []byte("deleted content")})
+	deleteTestSite(t, s, owner, previous.ID)
+	liveContent := []byte("unrelated active website")
+	createTestSite(t, s, member, "unaffected", testUploadFile{"index.html", liveContent})
+	// Fail after release installation to exercise the DB transaction rollback,
+	// rather than merely rejecting invalid input before changing any state.
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_slug_recreation BEFORE INSERT ON sites WHEN NEW.slug='retry-slug' BEGIN SELECT RAISE(ABORT,'forced insert failure'); END;`); err != nil {
+		t.Fatal(err)
+	}
+	r := uploadRequest(t, member, map[string]string{"name": "failed", "slug": "retry-slug"}, testUploadFile{"index.html", []byte("must be rolled back")})
+	w := httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("forced transaction failure: %d %s", w.Code, w.Body.String())
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM sites WHERE slug=?`, "retry-slug").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed create left an active claim: %d %v", count, err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM slug_reservations WHERE slug=?`, "retry-slug").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("failed create re-reserved released name: %d %v", count, err)
+	}
+	if response := publicRequest(s, "retry-slug.localhost", "/", ""); response.Code != http.StatusNotFound {
+		t.Fatalf("failed create served partial content: %d", response.Code)
+	}
+	if response := publicRequest(s, "unaffected.localhost", "/", ""); response.Body.String() != string(liveContent) {
+		t.Fatalf("failed create changed another website: %s", response.Body.String())
+	}
+	staged, err := os.ReadDir(filepath.Join(s.cfg.DataDir, "staging"))
+	if err != nil || len(staged) != 0 {
+		t.Fatalf("failed recreation left staging: %v %v", staged, err)
+	}
+	stored, err := directoryBytes(filepath.Join(s.cfg.DataDir, "sites"))
+	if err != nil || stored != int64(len(liveContent)) {
+		t.Fatalf("failed recreation left release content: %d %v", stored, err)
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER fail_slug_recreation`); err != nil {
+		t.Fatal(err)
+	}
+	current := createTestSite(t, s, admin, "retry-slug", testUploadFile{"index.html", []byte("successful retry by another user")})
+	if current.ID == previous.ID || current.URL != previous.URL || current.OwnerID != admin.ID {
+		t.Fatalf("failed recreation blocked retry: %+v", current)
+	}
+	if response := publicRequest(s, "retry-slug.localhost", "/", ""); response.Body.String() != "successful retry by another user" {
+		t.Fatalf("retry content: %s", response.Body.String())
+	}
+}
+
+func TestFailedDeleteKeepsWebsiteAndSlugClaim(t *testing.T) {
+	s, owner, member, _ := newSitesServer(t)
+	previous := createTestSite(t, s, owner, "delete-retry", testUploadFile{"index.html", []byte("must survive failed deletion")})
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_slug_delete BEFORE DELETE ON slug_reservations WHEN OLD.slug='delete-retry' BEGIN SELECT RAISE(ABORT,'forced delete failure'); END;`); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodDelete, "http://app.localhost/api/sites/"+previous.ID, nil)
+	r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, owner))
+	r.SetPathValue("id", previous.ID)
+	w := httptest.NewRecorder()
+	s.deleteSite(w, r)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("forced delete failure: %d %s", w.Code, w.Body.String())
+	}
+	if current, err := s.siteByID(previous.ID); err != nil || current.ID != previous.ID {
+		t.Fatalf("failed deletion removed site row: %+v %v", current, err)
+	}
+	if response := publicRequest(s, "delete-retry.localhost", "/", ""); response.Code != http.StatusOK || response.Body.String() != "must survive failed deletion" {
+		t.Fatalf("failed deletion damaged active website: %d %s", response.Code, response.Body.String())
+	}
+	var claimedBy string
+	if err := s.db.QueryRow(`SELECT owner_id FROM slug_reservations WHERE slug=?`, "delete-retry").Scan(&claimedBy); err != nil || claimedBy != owner.ID {
+		t.Fatalf("failed deletion lost name claim: %q %v", claimedBy, err)
+	}
+	r = uploadRequest(t, member, map[string]string{"name": "duplicate", "slug": "delete-retry"}, testUploadFile{"index.html", []byte("must not replace")})
+	w = httptest.NewRecorder()
+	s.createSite(w, r)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("failed deletion freed active name: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := s.db.Exec(`DROP TRIGGER fail_slug_delete`); err != nil {
+		t.Fatal(err)
+	}
+	deleteTestSite(t, s, owner, previous.ID)
+	current := createTestSite(t, s, member, "delete-retry", testUploadFile{"index.html", []byte("new member after successful deletion")})
+	if current.ID == previous.ID || current.URL != previous.URL || current.OwnerID != member.ID {
+		t.Fatalf("successful retry failed to release name: %+v", current)
 	}
 }
 
@@ -496,7 +681,8 @@ func TestUploadQuotasAndCrashReconciliation(t *testing.T) {
 
 func TestSlugReservationAndMultipartPaths(t *testing.T) {
 	s, owner, _, _ := newSitesServer(t)
-	for _, slug := range []string{"app", "www", "api", "admin", "a", "-abc", "abc-", "nested.name"} {
+	s.cfg.Reserved = append(s.cfg.Reserved, "in4")
+	for _, slug := range []string{"app", "www", "api", "admin", "in4", "a", "-abc", "abc-", "nested.name"} {
 		r := uploadRequest(t, owner, map[string]string{"name": "name", "slug": slug}, testUploadFile{"index.html", []byte("hello")})
 		w := httptest.NewRecorder()
 		s.createSite(w, r)

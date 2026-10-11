@@ -8,10 +8,11 @@ nhận link public dạng `tenweb.phatnt.id.vn`. Thiết kế cho router OpenWrt
 
 - Quản trị viên tạo link mời; người nhận tự chọn tài khoản và mật khẩu.
 - Thành viên quản lý website của mình; quản trị viên quản lý tất cả.
-- Upload một file HTML, ZIP hoặc thư mục, tối đa 50 MiB dữ liệu mỗi lượt.
+- Tự nhận dạng HTML, ZIP hoặc nội dung thư mục sau khi chọn file/thư mục;
+  tối đa 50 MiB dữ liệu mỗi lượt, không cần chọn loại upload thủ công.
 - Đổi tên hiển thị, cập nhật nội dung giữ nguyên link, xóa và sao chép link.
-- Slug đã xóa được giữ lại, không cấp cho website khác để link cũ không trỏ
-  sang nội dung mới.
+- Tên đang dùng là duy nhất; sau khi xóa website, bất kỳ thành viên nào cũng
+  dùng lại được slug đó. Các tên dành riêng như `app`, `in4` vẫn bị chặn.
 - Website chỉ chứa HTML/CSS/JavaScript và tài nguyên tĩnh. React/Vue phải được
   build trước khi upload; PHP, Node.js backend và database của website không chạy.
 - Website có thể dùng `localStorage`; dữ liệu riêng trên từng trình duyệt.
@@ -75,14 +76,18 @@ curl --fail --silent --show-error -H 'Host: app.localhost' http://127.0.0.1:8088
 
 ## Build và cài lên router
 
-Tải trực tiếp bản [v0.1.0 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.0):
+Tải trực tiếp bản [v0.1.1 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.1):
 
-- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz).
-- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.0/guiweb-openwrt-arm64.tar.gz.sha256).
+- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz).
+- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.1/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Có thể dùng `wget` trên router để tải hai file, kiểm tra SHA-256 trước khi
 giải nén; lệnh đầy đủ nằm trong [hướng dẫn OpenWrt](docs/OPENWRT.md#2-tải-gói-cài-và-kiểm-tra-checksum).
 Gói gồm binary, checksum, cấu hình và script dịch vụ; chưa tự cài lên router.
+
+Đang dùng v0.1.0: xem [hướng dẫn nâng cấp v0.1.1](docs/UPGRADE_0.1.1.md).
+Bản mới tự giải phóng cả những slug đã xóa từ v0.1.0; giữ tài khoản, cấu hình
+và website đang có. Giao diện upload tự nhận dạng nội dung được chọn.
 
 Nếu muốn tự build trong checkout:
 
@@ -122,6 +127,9 @@ thể chạy JavaScript trên trình duyệt, vì vậy chỉ mời người que
   trong terminal sau khi dừng riêng dịch vụ GửiWeb, rồi khởi động lại dịch vụ;
   mật khẩu không nằm trong tham số dòng lệnh.
 - Giữ dung lượng cho cả bản website cũ và mới trong lúc cập nhật.
+- Sau khi slug được dùng lại, link cũ hiển thị website mới. Xóa trên router
+  không xóa `localStorage` hoặc service worker của hostname trên trình duyệt;
+  người xem có thể cần xóa dữ liệu trang nếu nội dung cũ còn xuất hiện.
 - Không có sao lưu tự động; bộ nhớ hỏng hoặc cài lại router có thể mất dữ liệu.
 - Build thành công chưa chứng minh ứng dụng chạy trên router; cần kiểm tra local,
   HTTPS, upload, restart và đo RAM/CPU/disk trên thiết bị thật.
