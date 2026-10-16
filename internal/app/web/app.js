@@ -874,7 +874,7 @@
 
   function telegramSnippet(key) {
     const endpoint = telegramEndpoint(key);
-    return `const response = await fetch(${JSON.stringify(endpoint)}, {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ text: "Có lời nhắn mới từ website" })\n});\nif (!response.ok) {\n  const errors = {\n    400: "Nội dung chưa hợp lệ.",\n    404: "Website hoặc khóa không còn hoạt động.",\n    429: "Gửi quá nhanh. Hãy chờ rồi thử lại.",\n    502: "Telegram tạm thời không nhận được tin."\n  };\n  throw new Error(errors[response.status] || "Chưa gửi được tin.");\n}`;
+    return `async function guiwebSendMessage(text) {\n  const response = await fetch(${JSON.stringify(endpoint)}, {\n    method: "POST",\n    headers: { "Content-Type": "application/json" },\n    body: JSON.stringify({ text: text })\n  });\n  if (!response.ok) {\n    const errors = {\n      400: "Nội dung chưa hợp lệ.",\n      404: "Website hoặc khóa không còn hoạt động.",\n      429: "Gửi quá nhanh. Hãy chờ rồi thử lại.",\n      502: "Telegram tạm thời không nhận được tin."\n    };\n    throw new Error(errors[response.status] || "Chưa gửi được tin.");\n  }\n}\n// Trong sự kiện submit (async), gọi:\n// await guiwebSendMessage("Có lời nhắn mới từ website");`;
   }
 
   function renderKeys() {

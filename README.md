@@ -78,11 +78,16 @@ và cấp quyền gửi tin; `@ten_kenh` chỉ dùng cho kênh công khai.
 Chọn **Sao chép mã gửi tin** hoặc gọi từ chính website đã public:
 
 ```js
-await fetch('/__guiweb/telegram/CONTACT', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ text: 'Có lời nhắn mới từ website.' })
-});
+async function guiwebSendMessage(text) {
+  const response = await fetch('/__guiweb/telegram/CONTACT', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  });
+  if (!response.ok) throw new Error('Chưa gửi được tin nhắn.');
+}
+// Trong sự kiện submit (async), gọi:
+// await guiwebSendMessage('Có lời nhắn mới từ website.');
 ```
 
 Thay `CONTACT` bằng tên khóa đã lưu. Request chỉ gửi `text`; bot token và
