@@ -72,7 +72,10 @@ Loại **Khóa khác (chỉ lưu giữ)** là kho lưu phía server, chưa có p
 API tùy ý hoặc cách nhúng khóa đó vào JavaScript public.
 
 Với **Telegram Bot**, nhập bot token trong UI và **Chat ID nhận tin** cố
-định. Chọn **Sao chép mã gửi tin** hoặc gọi từ chính website đã public:
+định. Token lấy từ bot do bạn tạo với `@BotFather`. Với chat cá nhân, mở bot
+và nhấn **Start** trước, rồi dùng Chat ID dạng số. Với nhóm/kênh, thêm bot
+và cấp quyền gửi tin; `@ten_kenh` chỉ dùng cho kênh công khai.
+Chọn **Sao chép mã gửi tin** hoặc gọi từ chính website đã public:
 
 ```js
 await fetch('/__guiweb/telegram/CONTACT', {

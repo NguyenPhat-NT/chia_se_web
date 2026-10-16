@@ -220,7 +220,9 @@ còn hoạt động.
    xuất hiện dù tài khoản hiện tại là admin. Kiểm tra API không trả giá trị
    khóa rõ khi mở danh sách hoặc chọn **Thay khóa**.
 4. Telegram thật do chủ site tự cấu hình token và **Chat ID nhận tin** trong
-   UI khi sử dụng. Khi kiểm thử tự động, dùng Telegram mock để xác nhận
+   UI khi sử dụng. Chat cá nhân cần mở bot và nhấn **Start** trước; nhóm/kênh
+   cần thêm bot và cấp quyền gửi tin. Dùng Chat ID dạng số hoặc `@ten_kenh`
+   cho kênh công khai. Khi kiểm thử tự động, dùng Telegram mock để xác nhận
    chat cố định, Origin và rate limit; không dùng token thật trong bộ test.
 5. Kiểm tra các chức năng đã có: link đăng ký, upload file/thư mục, đổi tên,
    cập nhật cùng link, xóa và dùng lại slug; `in4.phatnt.id.vn` vẫn hoạt động.

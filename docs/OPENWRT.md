@@ -300,6 +300,9 @@ lý kho khóa của họ. Tối đa 20 tên/site, mẫu `[A-Z][A-Z0-9_]{0,63}`.
 **Khóa khác (chỉ lưu giữ)** lưu khóa mã hóa phía server; chưa có proxy API
 đa mục đích. **Telegram Bot** lưu bot token và **Chat ID nhận tin** cố định;
 nhập chúng trong UI, không đưa vào HTML, shell command, Git, log hoặc prompt.
+Token lấy từ bot của bạn trên `@BotFather`. Chat cá nhân cần mở bot và nhấn
+**Start** trước, dùng Chat ID dạng số; nhóm/kênh cần thêm bot và cấp quyền
+gửi tin. Giá trị `@ten_kenh` dành cho kênh công khai, không phải username cá nhân.
 
 Relay dùng đường dẫn `POST /__guiweb/telegram/TEN_KHOA` ngay trên hostname
 website public, JSON chỉ có `text`. Browser gửi đúng Origin của website;
