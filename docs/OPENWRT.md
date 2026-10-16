@@ -58,13 +58,13 @@ dung file credentials vào chat; chỉ cần thông tin kỹ thuật không nh�
 
 ## 2. Tải gói cài và kiểm tra checksum
 
-Nếu router đã cài v0.1.0 hoặc v0.1.1, dùng [hướng dẫn nâng cấp v0.1.2](UPGRADE_0.1.2.md)
+Nếu router đã cài v0.1.0–v0.1.2, dùng [hướng dẫn nâng cấp v0.1.3](UPGRADE_0.1.3.md)
 để giữ cấu hình, tài khoản và website; không chạy lại bước tạo admin.
 
-Tải trực tiếp bản [v0.1.2 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.2):
+Tải trực tiếp bản [v0.1.3 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.3):
 
-- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz).
-- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256).
+- [guiweb-openwrt-arm64.tar.gz](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz).
+- [guiweb-openwrt-arm64.tar.gz.sha256](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Dùng thư mục nhận riêng trên router. Ví dụ bên dưới dùng
 `/tmp/guiweb-release`; nếu đã có dữ liệu trong thư mục này, chọn thư mục mới
@@ -73,8 +73,8 @@ và thay đường dẫn tương ứng trong các bước sau. Chạy tải và 
 ```sh
 mkdir -p /tmp/guiweb-release
 cd /tmp/guiweb-release
-wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz'
-wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256'
+wget -O guiweb-openwrt-arm64.tar.gz 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz'
+wget -O guiweb-openwrt-arm64.tar.gz.sha256 'https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz.sha256'
 sha256sum -c guiweb-openwrt-arm64.tar.gz.sha256
 ```
 
@@ -147,7 +147,9 @@ Mặc định production giữ trống 512 MiB, giới hạn tổng dữ liệu 
 100 MiB. Quota tính cả staging và bản cũ trong lúc cập nhật; mức này cần phù
 hợp phân vùng đã chọn. Chưa dùng hạn mức tổng 4 GiB khi mount hiện tại chỉ
 có khoảng 1,8 GiB trống.
-Không `chown -R` cả mount hoặc các thư mục của dịch vụ khác. Website do admin
+Không `chown -R` cả mount hoặc các thư mục của dịch vụ khác. Service phải ghi
+được thư mục riêng để tự sinh `.secrets-key` quyền 600 trong lần chạy v0.1.3
+đầu tiên; không tạo hoặc chép một khóa mã hóa mẫu vào đó. Website do admin
 sở hữu dùng ngân sách chung; giới hạn upload, website và khoảng trống vẫn
 giữ nguyên. Admin cập nhật website thành viên vẫn theo quota của chủ đó.
 
@@ -290,7 +292,35 @@ Gói cài có `tunnel.ingress.fragment.yml` để tham khảo khi dùng config l
 Đây là danh sách bổ sung, không chứa tunnel ID, credentials hoặc route dịch
 vụ cũ; không thay toàn bộ config bằng file này.
 
-## 7. Kiểm chứng trên thiết bị thật
+## 7. Khóa API, Telegram và kiểm chứng trên thiết bị thật
+
+Tab **Khóa API** chỉ quản lý khóa cho website thuộc chính tài khoản đang
+đăng nhập. Admin quản lý nội dung site của người khác nhưng không được quản
+lý kho khóa của họ. Tối đa 20 tên/site, mẫu `[A-Z][A-Z0-9_]{0,63}`.
+**Khóa khác (chỉ lưu giữ)** lưu khóa mã hóa phía server; chưa có proxy API
+đa mục đích. **Telegram Bot** lưu bot token và **Chat ID nhận tin** cố định;
+nhập chúng trong UI, không đưa vào HTML, shell command, Git, log hoặc prompt.
+
+Relay dùng đường dẫn `POST /__guiweb/telegram/TEN_KHOA` ngay trên hostname
+website public, JSON chỉ có `text`. Browser gửi đúng Origin của website;
+không mở CORS. Mọi khách truy cập website đều có thể gọi chức năng này,
+không có xác thực người gửi riêng. Ratelimit 5 tin/phút/IP khách + site,
+20 tin/phút/site, 60 tin/phút chung; tối đa 4 request đồng thời toàn hệ thống,
+timeout 10s.
+Token, chat đích và URL gọi đi không nhận từ request. Server chỉ gửi văn bản
+thường tới API `sendMessage` cố định của Telegram.
+
+Router cần DNS và HTTPS cổng 443 tới `api.telegram.org`, cùng CA hệ thống
+hợp lệ. Route wildcard Tunnel hiện có phục vụ cả relay; không mở thêm cổng
+WAN. Kiểm thử tự động phải dùng Telegram mock; bot thật do chủ website tự
+nhập trong UI khi sử dụng.
+
+DB giữ các khóa dưới dạng AES-GCM, master key nằm ở
+`<data_dir>/.secrets-key`, thông thường `/overlay/guiweb/.secrets-key`, mode
+600. API không trả giá trị khóa rõ. Khi sao lưu/khôi phục phải giữ DB cùng
+file key; mất key khi DB có secret khiến service từ chối khởi động. Không
+thay key bằng file mới để vượt lỗi; cần bản sao DB/key tương ứng.
+
 
 Sau khi local và route đều đúng, truy cập HTTPS bằng trình duyệt rồi:
 
@@ -314,6 +344,14 @@ Sau khi local và route đều đúng, truy cập HTTPS bằng trình duyệt r�
 7. Kiểm tra CPU/RAM/disk khi upload và xem website cùng lúc, đo chức năng mạng.
 8. Restart riêng GửiWeb, kiểm tra dữ liệu còn nguyên và link vẫn phục vụ đúng.
 9. Kiểm tra lại `in4.phatnt.id.vn` và tất cả dịch vụ public cũ.
+10. Chọn **Dán HTML**, tạo một website rồi cập nhật HTML và kiểm tra link
+    giữ nguyên; bản HTML thay toàn bộ file cũ. Tab **Tạo với AI** chỉ tạo
+    prompt/sao chép clipboard, không tự gọi AI hoặc chạy backend tùy ý.
+11. Kiểm tra tab **Khóa API** chỉ liệt kê site của chính chủ. Cấu hình khóa
+    bằng UI; danh sách chỉ trả metadata, thao tác thay không hiển thị lại
+    giá trị cũ. Kiểm tra quyền bằng hai tài khoản khác nhau.
+12. Khi kiểm chứng relay tự động, dùng mock để xác nhận chat đích cố định,
+    Origin và các rate limit; không dùng token thật hoặc gửi tin ngoài ý muốn.
 
 Sau khi các bước cần thiết đều thành công:
 
@@ -331,12 +369,17 @@ trình duyệt. Khi slug được dùng lại, người xem có thể cần xóa
 
 ## 8. Nâng cấp, quên mật khẩu và quay lại bản cũ
 
-Từ v0.1.0 hoặc v0.1.1 lên v0.1.2, xem [các lệnh nâng cấp và quay lại](UPGRADE_0.1.2.md).
-Bản mới bổ sung cột đếm lượt đăng ký, giữ schema version 1 và dữ liệu cũ.
-Quay lại binary v0.1.0/v0.1.1 không cần khôi phục DB hoặc ghi đè config,
-nhưng link nhiều lượt không đăng ký được trên bản cũ. Số lượt đã dùng được
-giữ lại; khi chạy v0.1.2 trở lại, link tiếp tục dùng nếu còn hạn/lượt và chưa
-bị thu hồi. [Hướng dẫn v0.1.1](UPGRADE_0.1.1.md) vẫn được giữ để tham khảo.
+Từ v0.1.0–v0.1.2 lên v0.1.3, xem [các lệnh nâng cấp và quay lại](UPGRADE_0.1.3.md).
+Bản mới bổ sung bảng khóa mã hóa, giữ schema version 1, config và dữ liệu cũ.
+Service tự sinh `.secrets-key` trong data_dir ở lần chạy đầu nếu chưa có
+secret; thư mục dữ liệu hiện có phải ghi được bởi tài khoản service.
+
+Quay lại binary cũ không cần khôi phục DB; bản cũ không dùng vault hoặc file
+key. Giữ `.secrets-key` nguyên vẹn để chạy lại v0.1.3 và giải mã các khóa đã
+lưu. Nếu quay về v0.1.0/v0.1.1, link đăng ký nhiều lượt cũng tạm không dùng
+được; số lượt vẫn được giữ và dùng tiếp trên bản mới nếu còn hạn/lượt.
+Các hướng dẫn [v0.1.1](UPGRADE_0.1.1.md), [v0.1.2](UPGRADE_0.1.2.md) giữ lại
+để tham khảo lịch sử.
 
 Sau nâng cấp, tải lại trang quản lý một lần bằng **Ctrl+Shift+R**. v0.1.2
 dùng URL JS/CSS theo nội dung để tránh HTML mới đi cùng JS cũ trong cache,
@@ -356,7 +399,9 @@ su -s /bin/sh -c '/usr/bin/guiweb reset-password -config /etc/guiweb/config.json
 Trước nâng cấp, kiểm tra checksum binary mới, giữ binary/config cũ và dừng
 riêng service GửiWeb. Khi cần giữ DB trước migration, dùng backup SQLite nhất
 quán hoặc dừng service hoàn toàn và giữ cả dữ liệu DB liên quan; không copy
-một file DB đang hoạt động trong WAL mode rồi coi là backup đầy đủ.
+một file DB đang hoạt động trong WAL mode rồi coi là backup đầy đủ. Backup
+của v0.1.3 còn phải chứa `.secrets-key` tương ứng; cách đơn giản là dừng
+service và lưu cả thư mục dữ liệu, bao gồm file ẩn.
 Chọn tên bản lưu chưa tồn tại, chỉ thay binary sau khi xác nhận bản cũ còn giữ.
 
 Chạy readiness và một website thật sau nâng cấp. Nếu lỗi, dừng GửiWeb, khôi

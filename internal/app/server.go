@@ -33,6 +33,8 @@ type Server struct {
 	rateMu     sync.Mutex
 	attempts   map[string]attempt
 	lock       *os.File
+	secretKey  []byte
+	telegram   *telegramState
 }
 
 type userContextKey struct{}
@@ -43,6 +45,7 @@ CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT
 CREATE TABLE IF NOT EXISTS invites(id TEXT PRIMARY KEY,token_hash TEXT UNIQUE NOT NULL,created_by TEXT NOT NULL REFERENCES users(id),expires_at TEXT NOT NULL,used INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0,max_uses INTEGER NOT NULL DEFAULT 1 CHECK(max_uses BETWEEN 1 AND 1000),use_count INTEGER NOT NULL DEFAULT 0 CHECK(use_count BETWEEN 0 AND max_uses));
 CREATE TABLE IF NOT EXISTS sites(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id),name TEXT NOT NULL,slug TEXT UNIQUE NOT NULL,release_id TEXT NOT NULL,size_bytes INTEGER NOT NULL,spa INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS slug_reservations(slug TEXT PRIMARY KEY,owner_id TEXT NOT NULL REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS site_secrets(id TEXT PRIMARY KEY,site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,name TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN ('generic','telegram')),ciphertext BLOB NOT NULL,chat_id TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(site_id,name));
 INSERT OR IGNORE INTO slug_reservations(slug,owner_id) SELECT slug,owner_id FROM sites;
 DELETE FROM slug_reservations WHERE NOT EXISTS (SELECT 1 FROM sites WHERE sites.slug=slug_reservations.slug);
 CREATE INDEX IF NOT EXISTS sites_owner ON sites(owner_id);
@@ -163,7 +166,12 @@ func New(cfg Config) (*Server, error) {
 			return nil, err
 		}
 	}
-	s := &Server{cfg: cfg, db: db, attempts: map[string]attempt{}, lock: lock}
+	s := &Server{cfg: cfg, db: db, attempts: map[string]attempt{}, lock: lock, telegram: newTelegramState()}
+	if err = s.initializeSecrets(); err != nil {
+		db.Close()
+		lock.Close()
+		return nil, err
+	}
 	if err = s.reconcile(); err != nil {
 		db.Close()
 		lock.Close()
@@ -217,7 +225,7 @@ func prepareDataDir(dir string) error {
 			return errors.New("marker dữ liệu không hợp lệ")
 		}
 	}
-	for _, name := range []string{".lock", "guiweb.sqlite", "guiweb.sqlite-wal", "guiweb.sqlite-shm", "sites", "staging"} {
+	for _, name := range []string{".lock", ".secrets-key", "guiweb.sqlite", "guiweb.sqlite-wal", "guiweb.sqlite-shm", "sites", "staging"} {
 		i, e := os.Lstat(filepath.Join(dir, name))
 		if errors.Is(e, os.ErrNotExist) {
 			continue
@@ -279,6 +287,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("PATCH /api/sites/{id}", s.auth(s.patchSite))
 	m.HandleFunc("DELETE /api/sites/{id}", s.auth(s.deleteSite))
 	m.HandleFunc("POST /api/sites/{id}/upload", s.auth(s.replaceSite))
+	m.HandleFunc("GET /api/sites/{id}/keys", s.auth(s.listSiteKeys))
+	m.HandleFunc("POST /api/sites/{id}/keys", s.auth(s.saveSiteKey))
+	m.HandleFunc("DELETE /api/sites/{id}/keys/{name}", s.auth(s.deleteSiteKey))
 	m.HandleFunc("GET /api/invites", s.auth(s.listInvites))
 	m.HandleFunc("POST /api/invites", s.auth(s.createInvite))
 	m.HandleFunc("DELETE /api/invites/{id}", s.auth(s.revokeInvite))
@@ -315,6 +326,17 @@ func (s *Server) Handler() http.Handler {
 		}
 		_, _ = w.Write(data)
 	})
+	public := http.NewServeMux()
+	public.HandleFunc("/__guiweb/telegram/{name}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		s.relayTelegram(w, r)
+	})
+	// Keep integration paths out of uploaded files and SPA fallbacks.
+	public.HandleFunc("/__guiweb/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		http.NotFound(w, r)
+	})
+	public.HandleFunc("/", s.serveSite)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -324,7 +346,7 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		if host != s.cfg.AdminHost {
-			s.serveSite(w, r)
+			public.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("X-Frame-Options", "DENY")

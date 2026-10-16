@@ -2,7 +2,7 @@
 
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { user: null, csrf: '', limits: {}, usage: 0, sites: [], invites: [], tab: 'sites', selectedFiles: [], uploadMode: '', uploading: false, uploadSite: null, editSite: null, deleteSite: null };
+  const state = { user: null, csrf: '', limits: {}, capabilities: {}, usage: 0, sites: [], invites: [], tab: 'sites', selectedFiles: [], uploadMode: '', uploading: false, uploadSite: null, editSite: null, deleteSite: null, keys: [], keysSiteId: '', keysRequest: 0, keyBusy: false, deleteKey: null, aiKeys: [], aiRequest: 0 };
   const icons = {
     moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z"/></svg>',
     sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>',
@@ -114,6 +114,7 @@
     state.user = data.user;
     state.csrf = data.csrf;
     state.limits = data.limits || {};
+    state.capabilities = data.capabilities || {};
     state.usage = Number(data.usage_bytes) || 0;
   }
 
@@ -147,6 +148,7 @@
     state.csrf = '';
     state.sites = [];
     state.invites = [];
+    resetPrivateUI();
     document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
     $('sites-grid').replaceChildren();
     $('invites-list').replaceChildren();
@@ -187,6 +189,7 @@
       applySession(session);
       updateStorage();
       renderSites();
+      updateFeatureSites();
     } catch (error) {
       if (error.status !== 401) showError('sites-error', error.message);
     } finally {
@@ -258,7 +261,7 @@
     $('sites-grid').replaceChildren(...sites.map(siteCard));
   }
 
-  async function copyText(text, button) {
+  async function copyText(text, button, message = 'Đã sao chép link. Sẵn sàng để chia sẻ!') {
     try {
       if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
       else {
@@ -271,16 +274,18 @@
         input.remove();
         if (!copied) throw new Error('copy');
       }
-      notify('Đã sao chép link. Sẵn sàng để chia sẻ!');
+      notify(message);
     } catch {
-      notify('Không sao chép được tự động. Bạn có thể chọn và sao chép địa chỉ.', true);
+      notify('Không sao chép được tự động. Bạn có thể chọn và sao chép nội dung.', true);
     } finally { button?.focus(); }
   }
 
   function switchTab(tab) {
     if (tab === 'invites' && !state.user?.admin) return;
+    if (!['sites', 'keys', 'ai', 'invites'].includes(tab)) return;
+    $('key-value').value = '';
     state.tab = tab;
-    for (const name of ['sites', 'invites']) {
+    for (const name of ['sites', 'keys', 'ai', 'invites']) {
       const active = name === tab;
       $(`${name}-tab`).classList.toggle('active', active);
       $(`${name}-tab`).setAttribute('aria-selected', String(active));
@@ -288,6 +293,8 @@
       $(`${name}-panel`).hidden = !active;
     }
     if (tab === 'invites') refreshInvites();
+    if (tab === 'keys') { updateFeatureSites(); loadSiteKeys(); }
+    if (tab === 'ai') { updateFeatureSites(); loadAIKeys(); }
   }
 
   async function refreshInvites() {
@@ -353,7 +360,7 @@
 
   function setDialogBusy(dialog, busy) {
     dialog.dataset.busy = String(busy);
-    dialog.querySelectorAll('input,button').forEach(control => { control.disabled = busy; });
+    dialog.querySelectorAll('input,button,textarea,select').forEach(control => { control.disabled = busy; });
     dialog.setAttribute('aria-busy', String(busy));
   }
 
@@ -398,6 +405,7 @@
     $('upload-progress').hidden = true;
     showError('upload-error');
     renderFileSelection();
+    renderHTMLSource();
     showDialog($('upload-dialog'));
   }
 
@@ -445,13 +453,33 @@
     const mode = state.uploadMode;
     $('file-selection').hidden = files.length === 0;
     $('file-dropzone').hidden = files.length !== 0;
-    $('upload-submit').disabled = files.length === 0 || state.uploading;
+    updateUploadReady();
     $('upload-limit-hint').textContent = `Tối đa ${bytes(state.limits.upload_bytes || 50 * 1024 ** 2)}/lượt. ${mode === 'html' ? 'File HTML sẽ là trang chính. Các tài nguyên đi kèm cần tải cùng bằng ZIP hoặc thư mục.' : `ZIP, thư mục hoặc nhóm file cần có index.html. Website tối đa ${bytes(state.limits.site_bytes || 100 * 1024 ** 2)}.`}`;
     $('file-selection-type').textContent = '';
     if (!files.length) return;
     $('file-selection-type').textContent = `Đã nhận dạng: ${mode === 'zip' ? 'File ZIP' : mode === 'html' ? 'File HTML' : files.some(file => file.webkitRelativePath) ? 'Thư mục website' : 'Nhóm file website'}`;
     $('file-selection-name').textContent = mode === 'folder' ? files[0].webkitRelativePath?.split('/')[0] || 'Các file website đã chọn' : files[0].name;
     $('file-selection-size').textContent = `${files.length} file · ${bytes(files.reduce((sum, file) => sum + file.size, 0))}`;
+  }
+
+  function pastedHTMLMode() { return document.querySelector('input[name="upload-source"]:checked').value === 'html'; }
+
+  function htmlSize() { return new Blob([$('upload-html').value]).size; }
+
+  function htmlLimit() { return Math.min(state.limits.upload_bytes || 50 * 1024 ** 2, state.limits.site_bytes || 100 * 1024 ** 2); }
+
+  function updateUploadReady() {
+    const ready = pastedHTMLMode() ? Boolean($('upload-html').value.trim()) && htmlSize() <= htmlLimit() : state.selectedFiles.length > 0;
+    $('upload-submit').disabled = !ready || state.uploading;
+  }
+
+  function renderHTMLSource() {
+    const html = pastedHTMLMode();
+    $('upload-file-source').hidden = html;
+    $('upload-html-source').hidden = !html;
+    $('upload-html').required = html;
+    $('upload-html-size').textContent = `${bytes(htmlSize())} / ${bytes(htmlLimit())}`;
+    updateUploadReady();
   }
 
   function sendUpload(path, data) {
@@ -487,13 +515,17 @@
     event.preventDefault();
     if (state.uploading) return;
     showError('upload-error');
-    if (!state.selectedFiles.length) { showError('upload-error', 'Bạn chưa chọn nội dung website.'); $('choose-files-button').focus(); return; }
+    const pasted = pastedHTMLMode();
+    if (pasted && !$('upload-html').value.trim()) { showError('upload-error', 'Bạn chưa dán mã HTML.'); $('upload-html').focus(); return; }
+    if (pasted && htmlSize() > htmlLimit()) { showError('upload-error', `Mã HTML vượt giới hạn ${bytes(htmlLimit())}. Hãy giảm dung lượng rồi thử lại.`); return; }
+    if (!pasted && !state.selectedFiles.length) { showError('upload-error', 'Bạn chưa chọn nội dung website.'); $('choose-files-button').focus(); return; }
     if (!state.uploadSite && !$('site-name').value.trim()) { showError('upload-error', 'Hãy nhập tên website.'); $('site-name').focus(); return; }
-    const mode = state.uploadMode;
+    const mode = pasted ? 'html' : state.uploadMode;
     const data = new FormData();
     data.append('mode', mode);
     if (!state.uploadSite) { data.append('name', $('site-name').value.trim()); data.append('slug', $('site-slug').value.trim()); data.append('spa', String($('site-spa').checked)); }
-    for (const file of state.selectedFiles) data.append('files', file, mode === 'folder' ? file.webkitRelativePath || file.name : file.name);
+    if (pasted) data.append('files', new File([$('upload-html').value], 'index.html', { type: 'text/html;charset=utf-8' }), 'index.html');
+    else for (const file of state.selectedFiles) data.append('files', file, mode === 'folder' ? file.webkitRelativePath || file.name : file.name);
     const replacing = Boolean(state.uploadSite);
     const path = replacing ? `/api/sites/${encodeURIComponent(state.uploadSite.id)}/upload` : '/api/sites';
     state.uploading = true;
@@ -514,6 +546,7 @@
     } finally {
       state.uploading = false;
       setDialogBusy($('upload-dialog'), false);
+      updateUploadReady();
     }
   });
 
@@ -611,6 +644,7 @@
       state.csrf = '';
       state.sites = [];
       state.invites = [];
+      resetPrivateUI();
       $('sites-grid').replaceChildren();
       $('invites-list').replaceChildren();
       $('invite-url').value = '';
@@ -673,11 +707,15 @@
   $('empty-upload-button').addEventListener('click', () => openUpload());
   $('site-search').addEventListener('input', renderSites);
   $('sites-tab').addEventListener('click', () => switchTab('sites'));
+  $('keys-tab').addEventListener('click', () => switchTab('keys'));
+  $('ai-tab').addEventListener('click', () => switchTab('ai'));
   $('invites-tab').addEventListener('click', () => switchTab('invites'));
   document.querySelector('.tabs').addEventListener('keydown', event => {
-    if (!state.user?.admin || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const tab = event.key === 'Home' ? 'sites' : event.key === 'End' ? 'invites' : state.tab === 'sites' ? 'invites' : 'sites';
+    const tabs = ['sites', 'keys', 'ai', ...(state.user?.admin ? ['invites'] : [])];
+    const index = tabs.indexOf(state.tab);
+    const tab = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[tabs.length - 1] : tabs[(index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
     switchTab(tab);
     $(`${tab}-tab`).focus();
   });
@@ -689,6 +727,19 @@
   $('upload-files').addEventListener('change', event => { if (event.target.files.length) chooseFiles(event.target.files, 'files'); });
   $('upload-folder-files').addEventListener('change', event => { if (event.target.files.length) chooseFiles(event.target.files, 'folder'); });
   $('clear-files-button').addEventListener('click', () => { clearFiles(); showError('upload-error'); renderFileSelection(); $('choose-files-button').focus(); });
+  document.querySelectorAll('input[name="upload-source"]').forEach(input => input.addEventListener('change', () => {
+    if (state.uploading) return;
+    clearFiles();
+    $('upload-html').value = '';
+    showError('upload-error');
+    renderFileSelection();
+    renderHTMLSource();
+    if (pastedHTMLMode()) $('upload-html').focus();
+  }));
+  $('upload-html').addEventListener('input', () => {
+    renderHTMLSource();
+    showError('upload-error', htmlSize() > htmlLimit() ? `Mã HTML vượt giới hạn ${bytes(htmlLimit())}. Hãy giảm dung lượng rồi thử lại.` : '');
+  });
   $('file-dropzone').addEventListener('dragover', event => {
     event.preventDefault();
     if (!state.uploading) $('file-dropzone').classList.add('drag-over');
@@ -701,6 +752,317 @@
     const containsDirectory = Array.from(event.dataTransfer.items || []).some(item => item.webkitGetAsEntry?.()?.isDirectory);
     if (containsDirectory) { showError('upload-error', 'Hãy dùng “Chọn thư mục” để giữ đầy đủ các file bên trong, hoặc tải lên bản ZIP của website.'); return; }
     chooseFiles(event.dataTransfer.files, 'files');
+  });
+
+  function ownSites() { return state.sites.filter(site => site.owner_id === state.user?.id); }
+
+  function keyLimit() { return state.capabilities.key_limit || 20; }
+
+  function keyBytesLimit() { return state.capabilities.key_value_bytes || 4096; }
+
+  function telegramLimits() {
+    return { text_max_chars: 4096, ip_per_minute: 5, site_per_minute: 20, global_per_minute: 60, ...state.capabilities.telegram };
+  }
+
+  function resetPrivateUI() {
+    state.keys = [];
+    state.aiKeys = [];
+    state.keysSiteId = '';
+    state.keysRequest += 1;
+    state.aiRequest += 1;
+    state.keyMutation = (state.keyMutation || 0) + 1;
+    state.keyDeleteMutation = (state.keyDeleteMutation || 0) + 1;
+    state.keyBusy = false;
+    state.keysLoading = false;
+    state.capabilities = {};
+    $('key-form').reset();
+    $('key-value').value = '';
+    $('keys-list').replaceChildren();
+    $('keys-site').replaceChildren();
+    $('ai-site').replaceChildren(element('option', '', 'Tạo website mới'));
+    $('ai-site').firstElementChild.value = '';
+    $('ai-telegram-key').replaceChildren(element('option', '', 'Không dùng Telegram'));
+    $('ai-telegram-key').firstElementChild.value = '';
+    $('ai-brief').value = '';
+    $('ai-prompt').value = '';
+    $('upload-html').value = '';
+    clearFiles();
+  }
+
+  function updateFeatureSites() {
+    if (!state.user) return false;
+    const sites = ownSites();
+    const previous = state.keysSiteId;
+    const previousAI = $('ai-site').value;
+    const makeOption = site => { const option = element('option', '', site.name); option.value = site.id; return option; };
+    $('keys-site').replaceChildren(...sites.map(makeOption));
+    state.keysSiteId = sites.some(site => site.id === previous) ? previous : sites[0]?.id || '';
+    $('keys-site').value = state.keysSiteId;
+    const blank = element('option', '', 'Tạo website mới');
+    blank.value = '';
+    $('ai-site').replaceChildren(blank, ...sites.map(makeOption));
+    $('ai-site').value = sites.some(site => site.id === previousAI) ? previousAI : '';
+    if (previousAI !== $('ai-site').value) { state.aiKeys = []; state.aiRequest += 1; updateAIKeyOptions(); }
+    $('keys-empty-sites').hidden = sites.length > 0;
+    $('keys-workspace').hidden = sites.length === 0;
+    const site = sites.find(item => item.id === state.keysSiteId);
+    $('keys-site-url').textContent = site?.url || '';
+    const rates = telegramLimits();
+    $('telegram-rates').textContent = `Giới hạn gửi tin: ${rates.ip_per_minute}/phút mỗi IP trên cùng website · ${rates.site_per_minute}/phút mỗi website · ${rates.global_per_minute}/phút toàn hệ thống. Tối đa ${rates.text_max_chars} ký tự/tin.`;
+    $('key-value-hint').textContent = `Tối đa ${bytes(keyBytesLimit())}. Không hiển thị lại sau khi lưu; luôn nhập giá trị mới khi thay khóa.`;
+    if (previous !== state.keysSiteId) {
+      state.keys = [];
+      state.keysRequest += 1;
+      resetKeyForm();
+      renderKeys();
+    }
+    updateAIPrompt();
+    return previous !== state.keysSiteId;
+  }
+
+  function metadataKey(key) {
+    return { name: String(key.name || ''), kind: key.kind, chat_id: String(key.chat_id || ''), created_at: key.created_at, updated_at: key.updated_at, endpoint: String(key.endpoint || '') };
+  }
+
+  function telegramEndpoint(key) {
+    return key?.kind === 'telegram' && /^[A-Z][A-Z0-9_]{0,63}$/.test(key.name) && key.endpoint === `/__guiweb/telegram/${key.name}` ? key.endpoint : '';
+  }
+
+  function keyFormKind() {
+    const telegram = $('key-kind').value === 'telegram';
+    $('key-chat-field').hidden = !telegram;
+    $('key-chat-id').required = telegram;
+    $('key-chat-id').disabled = !telegram || state.keyBusy || state.keysLoading || !state.keysSiteId;
+    $('key-kind-hint').textContent = telegram ? 'Gửi tin nhắn tới một chat cố định, không lộ bot token.' : 'Chỉ lưu giữ khóa trên máy chủ. Hiện chưa có endpoint gọi các dịch vụ khác.';
+  }
+
+  function setKeyControls() {
+    $('key-form').querySelectorAll('input,select,button').forEach(control => { control.disabled = Boolean(state.keyBusy || state.keysLoading || !state.keysSiteId); });
+    $('keys-site').disabled = Boolean(state.keyBusy);
+    $('key-form').setAttribute('aria-busy', String(Boolean(state.keyBusy || state.keysLoading)));
+    keyFormKind();
+  }
+
+  function resetKeyForm() {
+    $('key-form').reset();
+    $('key-value').value = '';
+    showError('key-form-error');
+    keyFormKind();
+  }
+
+  async function loadSiteKeys() {
+    const siteId = state.keysSiteId;
+    const actor = state.user?.id;
+    if (!siteId || !ownSites().some(site => site.id === siteId)) return;
+    const request = ++state.keysRequest;
+    $('key-value').value = '';
+    state.keysLoading = true;
+    $('keys-loading').hidden = false;
+    showError('keys-error');
+    setKeyControls();
+    try {
+      const data = await api(`/api/sites/${encodeURIComponent(siteId)}/keys`);
+      if (request !== state.keysRequest || state.user?.id !== actor || state.keysSiteId !== siteId) return;
+      state.keys = Array.isArray(data.keys) ? data.keys.map(metadataKey) : [];
+      renderKeys();
+    } catch (error) {
+      if (request === state.keysRequest && error.status !== 401) showError('keys-error', error.message);
+    } finally {
+      if (request === state.keysRequest) { state.keysLoading = false; $('keys-loading').hidden = true; setKeyControls(); }
+    }
+  }
+
+  function telegramSnippet(key) {
+    const endpoint = telegramEndpoint(key);
+    return `const response = await fetch(${JSON.stringify(endpoint)}, {\n  method: "POST",\n  headers: { "Content-Type": "application/json" },\n  body: JSON.stringify({ text: "Có lời nhắn mới từ website" })\n});\nif (!response.ok) {\n  const errors = {\n    400: "Nội dung chưa hợp lệ.",\n    404: "Website hoặc khóa không còn hoạt động.",\n    429: "Gửi quá nhanh. Hãy chờ rồi thử lại.",\n    502: "Telegram tạm thời không nhận được tin."\n  };\n  throw new Error(errors[response.status] || "Chưa gửi được tin.");\n}`;
+  }
+
+  function renderKeys() {
+    $('key-count').textContent = `${state.keys.length}/${keyLimit()}`;
+    $('keys-empty').hidden = state.keys.length > 0;
+    $('keys-list').replaceChildren(...state.keys.map(key => {
+      const row = element('article', 'key-item');
+      const header = element('div', 'key-item-header');
+      const detail = element('div');
+      detail.append(element('h4', 'mono', key.name), element('span', 'field-hint', key.kind === 'telegram' ? `Telegram · Chat ${key.chat_id}` : 'Chỉ lưu giữ · Chưa có proxy dịch vụ'));
+      const actions = element('div', 'key-actions');
+      const edit = element('button', 'button button-small button-quiet', 'Thay khóa');
+      edit.type = 'button'; edit.disabled = state.keyBusy;
+      edit.setAttribute('aria-label', `Thay khóa ${key.name}`);
+      edit.addEventListener('click', () => {
+        resetKeyForm();
+        $('key-name').value = key.name;
+        $('key-kind').value = key.kind === 'telegram' ? 'telegram' : 'generic';
+        $('key-chat-id').value = key.chat_id;
+        keyFormKind();
+        $('key-value').focus();
+      });
+      const revoke = element('button', 'button button-small button-quiet', 'Thu hồi');
+      revoke.type = 'button'; revoke.disabled = state.keyBusy;
+      revoke.setAttribute('aria-label', `Thu hồi khóa ${key.name}`);
+      revoke.addEventListener('click', () => {
+        $('key-value').value = '';
+        state.deleteKey = { siteId: state.keysSiteId, name: key.name };
+        $('key-delete-name').textContent = key.name;
+        setDialogBusy($('key-delete-dialog'), false);
+        showError('key-delete-error');
+        showDialog($('key-delete-dialog'));
+      });
+      actions.append(edit, revoke); header.append(detail, actions); row.append(header);
+      row.append(element('span', 'field-hint', `Cập nhật ${dateTime(key.updated_at)}`));
+      if (telegramEndpoint(key)) {
+        row.append(element('code', 'key-endpoint', key.endpoint));
+        const snippet = element('details', 'key-snippet');
+        snippet.append(element('summary', '', 'Mã gửi tin từ website này'));
+        const pre = element('pre', 'code-snippet'); pre.append(element('code', '', telegramSnippet(key)));
+        const copy = element('button', 'button button-small button-quiet', 'Sao chép mã gửi tin'); copy.type = 'button';
+        copy.addEventListener('click', () => copyText(telegramSnippet(key), copy, 'Đã sao chép mã gửi tin. Chạy mã ở website đã chọn.'));
+        snippet.append(pre, copy, element('p', 'field-hint', 'Đường dẫn tương đối gọi đúng website đang mở. Mã không chứa bot token hoặc chat ID.'));
+        row.append(snippet);
+      }
+      return row;
+    }));
+  }
+
+  $('keys-site').addEventListener('change', () => {
+    state.keysSiteId = $('keys-site').value;
+    state.keys = [];
+    resetKeyForm();
+    renderKeys();
+    const site = ownSites().find(item => item.id === state.keysSiteId);
+    $('keys-site-url').textContent = site?.url || '';
+    loadSiteKeys();
+  });
+  $('key-kind').addEventListener('change', () => { $('key-value').value = ''; $('key-chat-id').value = ''; keyFormKind(); });
+  $('key-name').addEventListener('input', () => { $('key-name').value = $('key-name').value.toUpperCase(); });
+  $('key-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (state.keyBusy || state.keysLoading || !ownSites().some(site => site.id === state.keysSiteId)) return;
+    showError('key-form-error');
+    const name = $('key-name').value.trim();
+    const length = new TextEncoder().encode($('key-value').value).byteLength;
+    if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) { showError('key-form-error', 'Tên khóa cần bắt đầu bằng chữ in hoa, chỉ gồm chữ in hoa, số và dấu _.'); return; }
+    if (length < 1 || length > keyBytesLimit()) { showError('key-form-error', `Giá trị khóa cần từ 1 B đến ${bytes(keyBytesLimit())}.`); return; }
+    if (state.keys.length >= keyLimit() && !state.keys.some(key => key.name === name)) { showError('key-form-error', `Website đã có ${keyLimit()} khóa. Hãy thay khóa cùng tên hoặc thu hồi một khóa cũ.`); return; }
+    const actor = state.user.id;
+    const siteId = state.keysSiteId;
+    const mutation = state.keyMutation = (state.keyMutation || 0) + 1;
+    const body = { name, kind: $('key-kind').value, value: $('key-value').value, chat_id: $('key-kind').value === 'telegram' ? $('key-chat-id').value.trim() : '' };
+    $('key-value').value = '';
+    state.keyBusy = true; setKeyControls(); renderKeys();
+    try {
+      await api(`/api/sites/${encodeURIComponent(siteId)}/keys`, { method: 'POST', body });
+      if (state.user?.id !== actor || mutation !== state.keyMutation) return;
+      resetKeyForm();
+      await loadSiteKeys();
+      notify('Đã lưu khóa. Giá trị khóa sẽ không hiển thị lại.');
+    } catch (error) { if (state.user?.id === actor && mutation === state.keyMutation && error.status !== 401) showError('key-form-error', error.message); }
+    finally {
+      body.value = '';
+      if (mutation === state.keyMutation) { $('key-value').value = ''; state.keyBusy = false; setKeyControls(); renderKeys(); }
+    }
+  });
+  $('key-delete-submit').addEventListener('click', async () => {
+    const item = state.deleteKey;
+    if (!item || !ownSites().some(site => site.id === item.siteId)) return;
+    const actor = state.user.id;
+    const mutation = state.keyDeleteMutation = (state.keyDeleteMutation || 0) + 1;
+    setDialogBusy($('key-delete-dialog'), true);
+    showError('key-delete-error');
+    try {
+      await api(`/api/sites/${encodeURIComponent(item.siteId)}/keys/${encodeURIComponent(item.name)}`, { method: 'DELETE' });
+      if (state.user?.id !== actor || mutation !== state.keyDeleteMutation) return;
+      if (state.keysSiteId === item.siteId) await loadSiteKeys();
+      $('key-delete-dialog').close();
+      if (state.user) notify('Đã thu hồi khóa.');
+    } catch (error) { if (mutation === state.keyDeleteMutation && error.status !== 401) showError('key-delete-error', error.message); }
+    finally { if (mutation === state.keyDeleteMutation) setDialogBusy($('key-delete-dialog'), false); }
+  });
+
+  async function loadAIKeys() {
+    const siteId = $('ai-site').value;
+    const actor = state.user?.id;
+    const request = ++state.aiRequest;
+    state.aiKeys = [];
+    updateAIKeyOptions();
+    showError('ai-error');
+    if (!siteId || !ownSites().some(site => site.id === siteId)) return;
+    $('ai-telegram-hint').textContent = 'Đang đọc danh sách khóa Telegram…';
+    try {
+      const data = await api(`/api/sites/${encodeURIComponent(siteId)}/keys`);
+      if (request !== state.aiRequest || state.user?.id !== actor || $('ai-site').value !== siteId) return;
+      state.aiKeys = Array.isArray(data.keys) ? data.keys.map(metadataKey).filter(key => telegramEndpoint(key)) : [];
+      updateAIKeyOptions();
+    } catch (error) { if (request === state.aiRequest && error.status !== 401) { showError('ai-error', error.message); $('ai-telegram-hint').textContent = 'Chưa đọc được khóa Telegram. Bạn vẫn có thể tạo prompt website tĩnh.'; } }
+  }
+
+  function updateAIKeyOptions() {
+    const previous = $('ai-telegram-key').value;
+    const blank = element('option', '', 'Không dùng Telegram'); blank.value = '';
+    const options = state.aiKeys.map(key => { const option = element('option', '', key.name); option.value = key.name; return option; });
+    $('ai-telegram-key').replaceChildren(blank, ...options);
+    $('ai-telegram-key').value = state.aiKeys.some(key => key.name === previous) ? previous : '';
+    $('ai-telegram-key').disabled = !state.aiKeys.length;
+    $('ai-telegram-hint').textContent = state.aiKeys.length ? 'Chỉ tên khóa và endpoint được đưa vào prompt; không có giá trị khóa hoặc chat ID.' : $('ai-site').value ? 'Website chưa có khóa Telegram. Thêm ở mục Khóa API nếu cần gửi tin.' : 'Muốn dùng Telegram, hãy chọn website có khóa Telegram đã lưu.';
+    updateAIPrompt();
+  }
+
+  function updateAIPrompt() {
+    if (!state.user) return;
+    const site = ownSites().find(item => item.id === $('ai-site').value);
+    const key = state.aiKeys.find(item => item.name === $('ai-telegram-key').value);
+    const endpoint = site && key && telegramEndpoint(key);
+    const brief = $('ai-brief').value.trim();
+    const capabilities = state.capabilities;
+    const limits = [];
+    if (state.limits.upload_bytes) limits.push(`mỗi lượt tải lên tối đa ${bytes(state.limits.upload_bytes)}`);
+    if (state.limits.site_bytes) limits.push(`website sau giải nén tối đa ${bytes(state.limits.site_bytes)}`);
+    if (state.limits.max_files) limits.push(`tối đa ${state.limits.max_files} file/website`);
+    if (state.limits.user_bytes && !state.user.admin) limits.push(`hạn mức lưu trữ của chủ website ${bytes(state.limits.user_bytes)}`);
+    if (state.limits.total_bytes) limits.push(`dung lượng chung toàn hệ thống ${bytes(state.limits.total_bytes)}`);
+    const rates = telegramLimits();
+    const prompt = [
+      'Hãy tạo một website hoàn chỉnh bằng tiếng Việt để triển khai trên GửiWeb.',
+      '', 'Ý tưởng của tôi:', brief || '[Mô tả nội dung, giao diện và tương tác mong muốn ở đây.]', '',
+      'Môi trường triển khai:',
+      '- Website tĩnh HTML/CSS/JavaScript; JavaScript chạy trong trình duyệt. React/Vue phải được build trước khi tải lên.',
+      '- Không có Node.js, PHP, backend tùy ý, cơ sở dữ liệu hoặc API lưu dữ liệu dùng chung cho website.',
+      '- Có thể dùng localStorage cho dữ liệu riêng trên từng trình duyệt; xử lý trường hợp trình duyệt chặn lưu. Không coi đó là dữ liệu dùng chung.',
+      capabilities.base_domain ? `- Mỗi website có hostname riêng dưới ${capabilities.base_domain}.` : '- Mỗi website có hostname riêng do GửiWeb cấp.',
+      capabilities.admin_host ? `- ${capabilities.admin_host} là trang quản lý, không phải endpoint API công khai cho website.` : '- Không gọi API quản lý của GửiWeb từ website công khai.',
+      site ? `- Website đã chọn: ${site.name}. Địa chỉ hiện tại: ${site.url}. Nội dung mới cần giữ nguyên địa chỉ này.` : '- Đây là website mới; GửiWeb sẽ cấp địa chỉ sau khi tải lên.',
+      ...(limits.length ? [`- Giới hạn hiện tại: ${limits.join('; ')}.`] : []), '',
+      'Yêu cầu bàn giao:',
+      '- Ưu tiên một file index.html đầy đủ, có CSS trong <style> và JavaScript trong <script>, để tôi sao chép toàn bộ rồi chọn “Dán HTML” trong GửiWeb.',
+      '- Nếu cần nhiều file, cung cấp cấu trúc thư mục đầy đủ với index.html ở gốc và đường dẫn tài nguyên tương đối; tôi sẽ tải ZIP hoặc chọn cả thư mục. Không tự chạy lệnh build trên GửiWeb.',
+      '- Giao diện responsive, nhãn biểu mẫu rõ ràng, dùng được bàn phím, trạng thái tải/thành công/lỗi dễ hiểu.',
+      '- Không đưa API key, bot token, mật khẩu hoặc bí mật vào HTML, JavaScript, localStorage hay nội dung bàn giao.',
+      '- Kho Khóa API của GửiWeb hiện chỉ có proxy Telegram như mô tả bên dưới. Khóa loại khác chỉ được lưu giữ, không có proxy tự động cho mọi nhà cung cấp.', '',
+      ...(endpoint ? [
+        `Telegram đã cấu hình cho website này: tên khóa ${key.name}, endpoint ${endpoint}.`,
+        '- Chỉ gọi endpoint này bằng fetch với đường dẫn tương đối trên chính hostname website đã chọn. Không gọi từ hostname quản lý; không tự tạo endpoint khác.',
+        `- POST ${endpoint}; header Content-Type: application/json; body chỉ có {"text":"nội dung tin nhắn"}. Không gửi bot token, chat_id hay URL đích. Chat nhận đã cố định trên máy chủ.`,
+        `- Endpoint công khai: mọi khách truy cập có thể gửi tới chat đã cấu hình. Không dùng để truyền dữ liệu riêng tư. Tối đa ${rates.text_max_chars} ký tự/tin; ${rates.ip_per_minute} tin/phút mỗi IP trên cùng website, ${rates.site_per_minute} tin/phút mỗi website và ${rates.global_per_minute} tin/phút toàn hệ thống.`,
+        '- Kiểm tra response.ok và xử lý 400 (nội dung không hợp lệ), 404 (website/khóa không tồn tại hoặc đã thu hồi), 429 (gửi quá nhanh, chờ rồi thử lại), 502 (Telegram tạm lỗi). Không tự lặp gửi khi chưa biết kết quả.',
+      ] : ['Chưa chọn khóa Telegram cho website này. Không bịa endpoint hoặc tích hợp dịch vụ cần khóa bí mật; nếu ý tưởng cần Telegram, giải thích bước lưu khóa và chọn đúng endpoint trước khi dùng.']),
+      '', 'Trả về mã nguồn hoàn chỉnh, hướng dẫn ngắn cách sao chép HTML về GửiWeb để xuất bản, và chỉ rõ các giới hạn còn lại.',
+    ];
+    $('ai-prompt').value = prompt.join('\n');
+    $('ai-copy-button').disabled = !brief;
+  }
+
+  $('ai-site').addEventListener('change', loadAIKeys);
+  $('ai-telegram-key').addEventListener('change', updateAIPrompt);
+  $('ai-brief').addEventListener('input', updateAIPrompt);
+  $('ai-regenerate-button').addEventListener('click', () => { loadAIKeys(); updateAIPrompt(); notify('Đã tạo lại prompt theo mô tả và giới hạn hiện tại.'); });
+  $('ai-copy-button').addEventListener('click', () => copyText($('ai-prompt').value, $('ai-copy-button'), 'Đã sao chép prompt. Dán vào công cụ AI bạn đang dùng.'));
+  $('keys-create-site-button').addEventListener('click', () => openUpload());
+  $('ai-paste-button').addEventListener('click', () => {
+    const site = ownSites().find(item => item.id === $('ai-site').value);
+    openUpload(site || null);
+    document.querySelector('input[name="upload-source"][value="html"]').checked = true;
+    renderHTMLSource();
+    $('upload-html').focus();
   });
 
   async function initialize() {

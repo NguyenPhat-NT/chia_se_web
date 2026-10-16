@@ -8,9 +8,12 @@ nhận link public dạng `tenweb.phatnt.id.vn`. Thiết kế cho router OpenWrt
 
 - Quản trị viên tạo link đăng ký dùng chung hoặc một lần; người nhận tự tạo
   tài khoản thành viên và có thể chuyển tiếp link cho bạn bè.
-- Thành viên quản lý website của mình; quản trị viên quản lý tất cả.
+- Thành viên quản lý website của mình; admin quản lý nội dung tất cả website.
+  Kho khóa API chỉ chủ website được quản lý, kể cả khi người khác là admin.
 - Tự nhận dạng HTML, ZIP hoặc nội dung thư mục sau khi chọn file/thư mục;
   tối đa 50 MiB dữ liệu mỗi lượt, không cần chọn loại upload thủ công.
+- Dán HTML để tạo hoặc cập nhật website; sao chép prompt để tự dùng với AI.
+- Lưu khóa API phía server; có relay Telegram dùng bot và chat đã cấu hình.
 - Đổi tên hiển thị, cập nhật nội dung giữ nguyên link, xóa và sao chép link.
 - Tên đang dùng là duy nhất; sau khi xóa website, bất kỳ thành viên nào cũng
   dùng lại được slug đó. Các tên dành riêng như `app`, `in4` vẫn bị chặn.
@@ -41,6 +44,62 @@ Danh sách hiển thị số đăng ký thành công, số lượt còn lại, t
 thái. Link ngừng nhận đăng ký khi hết lượt, hết hạn hoặc bị admin thu hồi.
 Thu hồi không xóa các tài khoản đã đăng ký. Sao chép link ngay sau khi tạo
 và gửi qua kênh bạn đang dùng.
+
+## Dán HTML và tạo với AI
+
+Trong hộp tải lên, chọn **Dán HTML**, dán **Mã HTML đầy đủ** rồi tạo hoặc
+cập nhật website. Nội dung được lưu thành `index.html` và áp dụng các hạn
+mức upload hiện có. Khi cập nhật, link giữ nguyên nhưng toàn bộ bộ file cũ
+được thay bằng HTML mới; CSS/JS/ảnh từ bản trước không tự giữ lại. Dùng HTML
+có CSS/JS bên trong, hoặc upload ZIP/thư mục khi cần nhiều file.
+
+Tab **Tạo với AI** có ô **Bạn muốn làm website gì?**, nút **Tạo lại prompt**
+và **Sao chép prompt**. Bạn tự dán prompt vào công cụ AI mình chọn, rồi dán
+HTML kết quả vào GửiWeb. Nút chỉ tạo/sao chép văn bản trên trình duyệt; GửiWeb
+không tích hợp gọi AI trả phí hoặc chạy backend tùy ý từ mã được tạo.
+
+## Khóa API và Telegram
+
+Trong tab **Khóa API**, chọn **Website của bạn**, đặt **Tên khóa**, loại và
+**Giá trị khóa mới**, rồi **Lưu khóa**. Chỉ chủ website được tạo, thay hoặc
+thu hồi khóa; admin không quản lý kho khóa của website người khác. Mỗi site
+có tối đa 20 tên, theo mẫu `[A-Z][A-Z0-9_]{0,63}`: chữ cái viết hoa đầu tiên,
+sau đó là chữ hoa, số hoặc `_`, tổng tối đa 64 ký tự.
+
+Giá trị được mã hóa AES-GCM trong SQLite; API không trả lại khóa dạng rõ.
+**Thay khóa** yêu cầu nhập giá trị mới; **Thu hồi** ngừng dùng cấu hình đó.
+Loại **Khóa khác (chỉ lưu giữ)** là kho lưu phía server, chưa có proxy gọi
+API tùy ý hoặc cách nhúng khóa đó vào JavaScript public.
+
+Với **Telegram Bot**, nhập bot token trong UI và **Chat ID nhận tin** cố
+định. Chọn **Sao chép mã gửi tin** hoặc gọi từ chính website đã public:
+
+```js
+await fetch('/__guiweb/telegram/CONTACT', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: 'Có lời nhắn mới từ website.' })
+});
+```
+
+Thay `CONTACT` bằng tên khóa đã lưu. Request chỉ gửi `text`; bot token và
+chat đích được lấy từ server. Relay chỉ gọi phương thức `sendMessage` trên
+`api.telegram.org` với văn bản thường, không nhận token, chat đích hoặc URL
+tùy ý từ client.
+Browser phải gửi đúng Origin của website; server không mở CORS cho site khác.
+
+Endpoint này công khai với khách truy cập website, không xác thực riêng
+người gửi. Origin không phải cơ chế xác thực. Giới hạn: 5 tin/phút cho mỗi
+cặp IP khách + website, 20 tin/phút/website, 60 tin/phút toàn hệ thống, tối
+đa 4 request Telegram đồng thời toàn hệ thống, timeout 10 giây. Các mức này
+giúp giảm spam.
+Router cần truy cập HTTPS tới `api.telegram.org`; không đặt token vào HTML,
+Git, log hoặc prompt AI. Khi kiểm thử tự động, dùng Telegram mock.
+
+File khóa mã hóa nằm ở `<data_dir>/.secrets-key`, quyền 600, được service
+sinh trong lần chạy đầu. Giữ file này cùng DB khi sao lưu/khôi phục. Mất file
+khi đã lưu secret khiến các khóa không giải mã được và service từ chối khởi
+động; không tạo file thay thế để bỏ qua lỗi. Xem thêm [hướng dẫn OpenWrt](docs/OPENWRT.md).
 
 ## Phát triển trong cloud
 
@@ -93,18 +152,20 @@ curl --fail --silent --show-error -H 'Host: app.localhost' http://127.0.0.1:8088
 
 ## Build và cài lên router
 
-Tải trực tiếp bản [v0.1.2 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.2):
+Tải trực tiếp bản [v0.1.3 trên GitHub Releases](https://github.com/NguyenPhat-NT/chia_se_web/releases/tag/v0.1.3):
 
-- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz).
-- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.2/guiweb-openwrt-arm64.tar.gz.sha256).
+- [Gói cài OpenWrt ARM64](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz).
+- [SHA-256 của gói](https://github.com/NguyenPhat-NT/chia_se_web/releases/download/v0.1.3/guiweb-openwrt-arm64.tar.gz.sha256).
 
 Có thể dùng `wget` trên router để tải hai file, kiểm tra SHA-256 trước khi
 giải nén; lệnh đầy đủ nằm trong [hướng dẫn OpenWrt](docs/OPENWRT.md#2-tải-gói-cài-và-kiểm-tra-checksum).
 Gói gồm binary, checksum, cấu hình và script dịch vụ; chưa tự cài lên router.
+Trong gói có `UPGRADE_0.1.3.md` để đọc các lệnh nâng cấp ngoại tuyến.
 
-Đang dùng v0.1.0 hoặc v0.1.1: xem [hướng dẫn nâng cấp v0.1.2](docs/UPGRADE_0.1.2.md).
-Giữ tài khoản, cấu hình và website đang có; không tạo lại admin. Hướng dẫn
-[nâng cấp v0.1.1](docs/UPGRADE_0.1.1.md) được giữ để tham khảo lịch sử.
+Đang dùng v0.1.0–v0.1.2: xem [hướng dẫn nâng cấp v0.1.3](docs/UPGRADE_0.1.3.md).
+Giữ tài khoản, cấu hình, DB, website và `.secrets-key` nếu đã có; không tạo
+lại admin. Các hướng dẫn [v0.1.1](docs/UPGRADE_0.1.1.md) và
+[v0.1.2](docs/UPGRADE_0.1.2.md) được giữ để tham khảo lịch sử.
 
 Nếu muốn tự build trong checkout:
 
@@ -149,6 +210,8 @@ thể chạy JavaScript trên trình duyệt, vì vậy chỉ mời người que
   không xóa `localStorage` hoặc service worker của hostname trên trình duyệt;
   người xem có thể cần xóa dữ liệu trang nếu nội dung cũ còn xuất hiện.
 - Không có sao lưu tự động; bộ nhớ hỏng hoặc cài lại router có thể mất dữ liệu.
+  Khi sao lưu thủ công, dừng service và giữ toàn bộ thư mục dữ liệu, gồm DB
+  và `.secrets-key`; không chỉ copy riêng SQLite khi đang chạy WAL.
 - Build thành công chưa chứng minh ứng dụng chạy trên router; cần kiểm tra local,
   HTTPS, upload, restart và đo RAM/CPU/disk trên thiết bị thật.
 

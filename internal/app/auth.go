@@ -113,7 +113,15 @@ func (s *Server) mePayload(u User, csrf string) (map[string]any, error) {
 	} else {
 		err = s.db.QueryRow("SELECT COALESCE(SUM(size_bytes),0) FROM sites WHERE owner_id=?", u.ID).Scan(&used)
 	}
-	return map[string]any{"user": u, "csrf": csrf, "limits": map[string]any{"upload_bytes": s.cfg.UploadBytes, "site_bytes": s.cfg.SiteBytes, "total_bytes": s.cfg.TotalBytes, "user_bytes": s.cfg.UserBytes, "max_files": s.cfg.MaxFiles}, "usage_bytes": used}, err
+	return map[string]any{
+		"user": u, "csrf": csrf, "usage_bytes": used,
+		"limits": map[string]any{"upload_bytes": s.cfg.UploadBytes, "site_bytes": s.cfg.SiteBytes, "total_bytes": s.cfg.TotalBytes, "user_bytes": s.cfg.UserBytes, "max_files": s.cfg.MaxFiles},
+		"capabilities": map[string]any{
+			"base_domain": s.cfg.BaseDomain, "admin_host": s.cfg.AdminHost,
+			"key_limit": 20, "key_value_bytes": 4096,
+			"telegram": map[string]any{"endpoint_prefix": "/__guiweb/telegram/", "text_max_chars": 4096, "ip_per_minute": 5, "site_per_minute": 20, "global_per_minute": 60},
+		},
+	}, err
 }
 
 func (s *Server) respondMe(w http.ResponseWriter, u User, csrf string) {
